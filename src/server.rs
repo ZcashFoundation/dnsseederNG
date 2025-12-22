@@ -293,9 +293,8 @@ impl SeederAuthority {
                     return response_handle
                         .send_response(response)
                         .await
-                        .map_err(|e| {
+                        .inspect_err(|_e| {
                             counter!("seeder.dns.errors_total").increment(1);
-                            e
                         })
                         .unwrap_or_else(|_| {
                             ResponseInfo::from(header) // fallback

@@ -91,3 +91,6 @@ Monitor these metrics to ensure the seeder is healthy and serving useful data:
 - [x] Metrics & Observability (Basic Prometheus exporter and tracing)
 - [x] CI/CD (GitHub Actions)
 - [ ] Deployment (Containerization)
+- [ ] Improve bootstrapping.  Add mechanism for seeder to be resilient in the face of failure of all other seeders, which is how the Zcash network bootstraps.  Perhaps allow a list of known good long lived peers to be specified in the config, and the seeder will try to connect to them in order to bootstrap. 
+
+
