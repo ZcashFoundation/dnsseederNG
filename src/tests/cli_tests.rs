@@ -19,3 +19,10 @@ fn test_cli_parsing_with_config() {
     assert_eq!(app.config.unwrap().to_str().unwrap(), "/path/to/config.toml");
     assert_eq!(app.verbose, "debug");
 }
+
+#[test]
+fn test_cli_parsing_args_after_subcommand() {
+    let args = vec!["zebra-seeder", "start", "--verbose", "debug"];
+    let app = SeederApp::try_parse_from(args).expect("should parse");
+    assert_eq!(app.verbose, "debug");
+}

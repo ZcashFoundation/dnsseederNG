@@ -9,11 +9,11 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[command(author, version, about = "Zcash DNS Seeder", long_about = None)]
 pub struct SeederApp {
     /// Path to configuration file
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     pub config: Option<PathBuf>,
 
     /// Filter for tracing events (e.g. "info", "debug")
-    #[arg(short, long, default_value = "info")]
+    #[arg(short, long, default_value = "info", global = true)]
     pub verbose: String,
 
     #[command(subcommand)]
