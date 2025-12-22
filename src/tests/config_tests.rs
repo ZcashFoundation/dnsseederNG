@@ -20,14 +20,26 @@ fn test_env_overrides() {
     env::set_var("ZEBRA_SEEDER__CRAWL_INTERVAL", "30s");
     
     // We can't really pass "None" path to `load_with_env` if we want JUST env, 
-    // but `load_with_env(None)` loads defaults + env.
+    std::env::set_var("ZEBRA_SEEDER__CRAWL_INTERVAL", "5m");
+    
     let config = SeederConfig::load_with_env(None).expect("should load");
     
     assert_eq!(config.seed_domain, "test.example.com");
-    // "30s" string is parsed by humantime-serde
-    assert_eq!(config.crawl_interval, Duration::from_secs(30)); 
+    assert_eq!(config.crawl_interval, std::time::Duration::from_secs(300));
     
     // Clean up
     env::remove_var("ZEBRA_SEEDER__SEED_DOMAIN");
     env::remove_var("ZEBRA_SEEDER__CRAWL_INTERVAL");
+}
+
+#[test]
+fn test_config_loading_from_env_overrides_network() {
+    // Set environment variables
+    std::env::set_var("ZEBRA_SEEDER__NETWORK__NETWORK", "Testnet");
+    std::env::set_var("ZEBRA_SEEDER__DNS_LISTEN_ADDR", "0.0.0.0:1053");
+    
+    let config = SeederConfig::load_with_env(None).expect("should load");
+    
+    assert_eq!(config.network.network.to_string(), "Testnet");
+    assert_eq!(config.dns_listen_addr.port(), 1053);
 }

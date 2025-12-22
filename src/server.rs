@@ -36,17 +36,32 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     
     // Spawn the Crawl Coordinator
     let crawl_interval = config.crawl_interval;
+    let address_book_monitor = address_book.clone();
+    
     let _crawler_handle = tokio::spawn(async move {
-        // Keep peer_set alive in the crawler if needed, or just let it drop if it's not needed?
-        // Actually peer_set drives the network? No, it's a client service.
-        // zebra-network background tasks are spawned during init.
-        // We might need to keep peer_set to prevent it from dropping?
+        // Keep peer_set alive in the crawler task to ensure the network stack keeps running
         let _keep_alive = peer_set; 
         
         let mut interval = time::interval(crawl_interval);
+        
         loop {
             interval.tick().await;
             tracing::info!("Starting network crawl...");
+            
+            // Log Address Book stats
+            if let Ok(book) = address_book_monitor.lock() {
+                // Zebra's AddressBook exposes `len()`, `reconnection_peers()`, etc.
+                // We'll log the total number of peers known.
+                let total_peers = book.len();
+                // Depending on the version of zebra_network, we might have other metrics.
+                // For now, total peers is a good "pulse" check.
+                tracing::info!(
+                    "Crawler Status: {} known peers in address book.", 
+                    total_peers
+                );
+            } else {
+                tracing::warn!("Failed to lock address book for monitoring");
+            }
         }
     });
 
