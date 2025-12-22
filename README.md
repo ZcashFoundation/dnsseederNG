@@ -130,4 +130,5 @@ Pass environment variables to the container. See `docker-compose.yml` for exampl
 - [x] Deployment (Containerization)
 - [ ] Improve bootstrapping (Resilience against seed failures) 
 
-
+## Known Issues
+- [ ] DNS server not accessible over udp/1053 when running in docker.  May be distroless related.

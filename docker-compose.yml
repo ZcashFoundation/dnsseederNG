@@ -12,7 +12,7 @@ services:
       - "9999:9999/tcp"
     environment:
       # Example configuration
-      # ZEBRA_SEEDER__NETWORK__NETWORK: "Testnet"
+      - ZEBRA_SEEDER__NETWORK__NETWORK=Testnet
       - ZEBRA_SEEDER__DNS_LISTEN_ADDR=0.0.0.0:1053
       # Enable metrics by uncommenting:
       - ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR=0.0.0.0:9999
