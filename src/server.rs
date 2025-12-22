@@ -11,6 +11,9 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::time;
 
+use metrics::{counter, gauge, histogram};
+use tracing::{info_span, Instrument};
+
 pub async fn spawn(config: SeederConfig) -> Result<()> {
     tracing::info!("Initializing zebra-network...");
 
@@ -36,6 +39,7 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     // Spawn the Crawl Coordinator
     let crawl_interval = config.crawl_interval;
     let address_book_monitor = address_book.clone();
+    let default_port = config.network.network.default_port();
 
     let _crawler_handle = tokio::spawn(async move {
         // Keep peer_set alive in the crawler task to ensure the network stack keeps running
@@ -51,7 +55,7 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
             // Log Address Book stats
             if let Ok(book) = address_book_monitor.lock() {
-                log_crawler_status(&book);
+                log_crawler_status(&book, default_port);
             } else {
                 tracing::warn!("Failed to lock address book for monitoring");
             }
@@ -92,12 +96,32 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     Ok(())
 }
 
-fn log_crawler_status(book: &zebra_network::AddressBook) {
+fn log_crawler_status(book: &zebra_network::AddressBook, default_port: u16) {
     let total_peers = book.len();
+    
+    // Calculate eligible peers (passing filter criteria)
+    let peers: Vec<_> = book.peers().collect();
+    
+    let eligible_v4 = peers.iter().filter(|meta| {
+        let ip = meta.addr().ip();
+        let is_global = !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+        is_global && ip.is_ipv4() && meta.addr().port() == default_port
+    }).count();
+
+    let eligible_v6 = peers.iter().filter(|meta| {
+        let ip = meta.addr().ip();
+        let is_global = !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+        is_global && ip.is_ipv6() && meta.addr().port() == default_port
+    }).count();
+
     tracing::info!(
-        "Crawler Status: {} known peers in address book.",
-        total_peers
+        "Crawler Status: Total={} | Eligible IPv4={} | Eligible IPv6={}",
+        total_peers, eligible_v4, eligible_v6
     );
+
+    gauge!("seeder.peers.total").set(total_peers as f64);
+    gauge!("seeder.peers.eligible", "addr_family" => "v4").set(eligible_v4 as f64);
+    gauge!("seeder.peers.eligible", "addr_family" => "v6").set(eligible_v6 as f64);
 }
 
 #[derive(Clone)]
@@ -168,6 +192,21 @@ impl RequestHandler for SeederAuthority {
     async fn handle_request<R: ResponseHandler>(
         &self,
         request: &hickory_server::server::Request,
+        response_handle: R,
+    ) -> ResponseInfo {
+        let span = info_span!("dns_query", client_addr = %request.src());
+        async move {
+            self.handle_request_inner(request, response_handle).await
+        }
+        .instrument(span)
+        .await
+    }
+}
+
+impl SeederAuthority {
+    async fn handle_request_inner<R: ResponseHandler>(
+        &self,
+        request: &hickory_server::server::Request,
         mut response_handle: R,
     ) -> ResponseInfo {
         let builder = MessageResponseBuilder::from_message_request(request);
@@ -218,6 +257,8 @@ impl RequestHandler for SeederAuthority {
                 matched_peers.shuffle(&mut rng());
                 matched_peers.truncate(25);
 
+                histogram!("seeder.dns.response_peers").record(matched_peers.len() as f64);
+
                 for peer in matched_peers {
                     let rdata = match peer.addr().ip() {
                         std::net::IpAddr::V4(ipv4) => RData::A(hickory_proto::rr::rdata::A(ipv4)),
@@ -233,10 +274,22 @@ impl RequestHandler for SeederAuthority {
 
             match record_type {
                 RecordType::A | RecordType::AAAA => {
+                    // Record metric by type
+                    let type_label = match record_type {
+                        RecordType::A => "A",
+                        RecordType::AAAA => "AAAA",
+                        _ => "other",
+                    };
+                    counter!("seeder.dns.queries_total", &[("record_type", type_label)]).increment(1);
+
                     let response = builder.build(header, records.iter(), &[], &[], &[]);
                     return response_handle
                         .send_response(response)
                         .await
+                        .map_err(|e| {
+                             counter!("seeder.dns.errors_total").increment(1);
+                             e
+                        })
                         .unwrap_or_else(|_| {
                             ResponseInfo::from(header) // fallback
                         });
@@ -259,7 +312,6 @@ impl RequestHandler for SeederAuthority {
     }
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;

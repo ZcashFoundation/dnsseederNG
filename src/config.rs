@@ -21,6 +21,29 @@ pub struct SeederConfig {
     /// Duration between refreshing the address book.
     #[serde(with = "humantime_serde")]
     pub crawl_interval: Duration,
+
+    /// Prometheus metrics configuration.
+    ///
+    /// If `None`, metrics are disabled.
+    pub metrics: Option<MetricsConfig>,
+}
+
+/// Configuration for Prometheus metrics.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MetricsConfig {
+    /// The socket address to expose Prometheus metrics on.
+    ///
+    /// Defaults to `0.0.0.0:9999`.
+    pub endpoint_addr: SocketAddr,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            endpoint_addr: "0.0.0.0:9999".parse().expect("valid address"),
+        }
+    }
 }
 
 impl Default for SeederConfig {
@@ -32,6 +55,7 @@ impl Default for SeederConfig {
                 .expect("hardcoded address must be valid"),
             seed_domain: "mainnet.seeder.example.com".to_string(),
             crawl_interval: Duration::from_secs(600), // 10 minutes
+            metrics: None,
         }
     }
 }

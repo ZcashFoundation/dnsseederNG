@@ -43,6 +43,10 @@ impl SeederApp {
 
                 info!("Starting zebra-seeder with config: {:?}", config);
 
+                if let Some(ref metrics_config) = config.metrics {
+                    crate::metrics::init(metrics_config.endpoint_addr)?;
+                }
+
                 // TODO: Initialize Async Skeleton & DNS Handler in next step
                 // For now, just keep the process alive or exit
                 crate::server::spawn(config).await?;

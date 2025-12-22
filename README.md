@@ -52,6 +52,7 @@ You can create a `.env` file in the project root to persit environment variables
 ZEBRA_SEEDER__NETWORK__NETWORK="Mainnet"
 ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:1053"
 ZEBRA_SEEDER__SEED_DOMAIN="mainnet.seeder.example.com"
+ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
 ```
 
 ## Architecture
@@ -59,11 +60,34 @@ ZEBRA_SEEDER__SEED_DOMAIN="mainnet.seeder.example.com"
 - **DNS Server**: Uses `hickory-dns` (formerly `trust-dns`) to serve DNS records.
 - **Service Pattern**: Implements `tower::Service` for modular request handling.
 
+## Metrics (Observability)
+
+The seeder can expose Prometheus metrics. To enable them, add a `[metrics]` section to your configuration file:
+
+```toml
+[metrics]
+endpoint_addr = "0.0.0.0:9999"
+```
+
+Or set the environment variable: `ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"`.
+
+Once enabled, metrics are available at `http://localhost:9999/metrics`.
+
+### Key Metrics for Operators
+Monitor these metrics to ensure the seeder is healthy and serving useful data:
+
+-   **`seeder.peers.eligible`** (Gauge, labels: `v4`, `v6`): **Critical**. The number of peers that are currently reachable, routable, and listening on the default zcash port. If this drops to 0, the seeder is effectively returning empty or bad lists.
+-   **`seeder.dns.queries_total`** (Counter, labels: `A`, `AAAA`): Traffic volume.
+-   **`seeder.dns.errors_total`** (Counter): Should be near zero. Spikes indicate socket handling issues.
+-   **`seeder.dns.response_peers`** (Histogram): Tracks how many peers are returned per query. A healthy seeder should consistently return near 25 peers. A shift to lower numbers indicates the address book is running dry of eligible peers.
+-   **`seeder.peers.total`** (Gauge): Raw size of the address book (includes unresponsive/unverified peers).
+
 ## Roadmap
 - [x] Initial Scaffolding (Project setup, basic dependencies)
 - [x] Configuration System (Env vars, TOML, Defaults, Dotenv)
 - [x] CLI Entry Point
 - [x] Implement DNS Request Handler (Connect `AddressBook` to DNS responses)
 - [x] Implement Crawler Logic (Active peer discovery loop & monitoring)
-- [ ] Metrics & Observability
-- [ ] Deployment & CI/CD
+- [x] Metrics & Observability (Basic Prometheus exporter and tracing)
+- [x] CI/CD (GitHub Actions)
+- [ ] Deployment (Containerization)
