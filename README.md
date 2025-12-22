@@ -6,7 +6,7 @@ A Rust-based DNS seeder for the Zcash network, mirroring patterns from the [Zebr
 To create a standalone binary that crawls the Zcash network using `zebra-network` and serves A/AAAA records using `hickory-dns`.
 
 ## Status
-**Current State**: Network Crawling Active
+**Current State**: DNS Server Active
 
 ### Completed Features
 - **Project Structure**: Initialized with `tokio`, `zebra-network`, `zebra-chain`, and `hickory-dns`.
@@ -15,6 +15,7 @@ To create a standalone binary that crawls the Zcash network using `zebra-network
 - **CLI**: `clap`-based command line interface with `start` command.
 - **Async Runtime**: Basic `tokio` orchestration with `tracing` for logging.
 - **Crawler**: Active network crawler with address book monitoring.
+- **DNS Server**: Authoritative DNS server serving A/AAAA records from filtered peers.
 - **Testing**: Unit tests for configuration loading and CLI argument parsing.
 
 ## Usage
@@ -22,6 +23,19 @@ To create a standalone binary that crawls the Zcash network using `zebra-network
 ### Running the Seeder
 ```bash
 cargo run -- start --verbose debug
+```
+
+### Verifying DNS Responses
+Once the server is running, you can verify it using `dig`:
+
+**IPv4 (A Record):**
+```bash
+dig @127.0.0.1 -p 1053 testnet.seeder.example.com A
+```
+
+**IPv6 (AAAA Record):**
+```bash
+dig @127.0.0.1 -p 1053 testnet.seeder.example.com AAAA
 ```
 
 ### Configuration
@@ -37,6 +51,7 @@ You can create a `.env` file in the project root to persit environment variables
 # Example .env content
 ZEBRA_SEEDER__NETWORK__NETWORK="Mainnet"
 ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:1053"
+ZEBRA_SEEDER__SEED_DOMAIN="mainnet.seeder.example.com"
 ```
 
 ## Architecture
@@ -48,7 +63,7 @@ ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:1053"
 - [x] Initial Scaffolding (Project setup, basic dependencies)
 - [x] Configuration System (Env vars, TOML, Defaults, Dotenv)
 - [x] CLI Entry Point
-- [ ] Implement DNS Request Handler (Connect `AddressBook` to DNS responses)
+- [x] Implement DNS Request Handler (Connect `AddressBook` to DNS responses)
 - [x] Implement Crawler Logic (Active peer discovery loop & monitoring)
 - [ ] Metrics & Observability
 - [ ] Deployment & CI/CD

@@ -4578,12 +4578,16 @@ dependencies = [
 name = "zebra-seeder"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap",
  "color-eyre",
  "config",
  "dotenvy",
  "hickory-dns",
+ "hickory-proto",
+ "hickory-server",
  "humantime-serde",
+ "rand 0.9.2",
  "serde",
  "tokio",
  "tower",
