@@ -98,25 +98,33 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
 fn log_crawler_status(book: &zebra_network::AddressBook, default_port: u16) {
     let total_peers = book.len();
-    
+
     // Calculate eligible peers (passing filter criteria)
     let peers: Vec<_> = book.peers().collect();
-    
-    let eligible_v4 = peers.iter().filter(|meta| {
-        let ip = meta.addr().ip();
-        let is_global = !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
-        is_global && ip.is_ipv4() && meta.addr().port() == default_port
-    }).count();
 
-    let eligible_v6 = peers.iter().filter(|meta| {
-        let ip = meta.addr().ip();
-        let is_global = !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
-        is_global && ip.is_ipv6() && meta.addr().port() == default_port
-    }).count();
+    let eligible_v4 = peers
+        .iter()
+        .filter(|meta| {
+            let ip = meta.addr().ip();
+            let is_global = !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+            is_global && ip.is_ipv4() && meta.addr().port() == default_port
+        })
+        .count();
+
+    let eligible_v6 = peers
+        .iter()
+        .filter(|meta| {
+            let ip = meta.addr().ip();
+            let is_global = !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+            is_global && ip.is_ipv6() && meta.addr().port() == default_port
+        })
+        .count();
 
     tracing::info!(
         "Crawler Status: Total={} | Eligible IPv4={} | Eligible IPv6={}",
-        total_peers, eligible_v4, eligible_v6
+        total_peers,
+        eligible_v4,
+        eligible_v6
     );
 
     gauge!("seeder.peers.total").set(total_peers as f64);
@@ -195,11 +203,9 @@ impl RequestHandler for SeederAuthority {
         response_handle: R,
     ) -> ResponseInfo {
         let span = info_span!("dns_query", client_addr = %request.src());
-        async move {
-            self.handle_request_inner(request, response_handle).await
-        }
-        .instrument(span)
-        .await
+        async move { self.handle_request_inner(request, response_handle).await }
+            .instrument(span)
+            .await
     }
 }
 
@@ -280,15 +286,16 @@ impl SeederAuthority {
                         RecordType::AAAA => "AAAA",
                         _ => "other",
                     };
-                    counter!("seeder.dns.queries_total", &[("record_type", type_label)]).increment(1);
+                    counter!("seeder.dns.queries_total", &[("record_type", type_label)])
+                        .increment(1);
 
                     let response = builder.build(header, records.iter(), &[], &[], &[]);
                     return response_handle
                         .send_response(response)
                         .await
                         .map_err(|e| {
-                             counter!("seeder.dns.errors_total").increment(1);
-                             e
+                            counter!("seeder.dns.errors_total").increment(1);
+                            e
                         })
                         .unwrap_or_else(|_| {
                             ResponseInfo::from(header) // fallback

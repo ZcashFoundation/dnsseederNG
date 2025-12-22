@@ -11,8 +11,8 @@ pub fn init(addr: SocketAddr) -> Result<()> {
         .with_http_listener(addr)
         .install()
         .wrap_err("failed to install Prometheus recorder")?;
-    
+
     tracing::info!("Metrics endpoints listening on http://{}/metrics", addr);
-    
+
     Ok(())
 }
