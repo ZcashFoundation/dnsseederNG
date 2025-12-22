@@ -82,6 +82,26 @@ Monitor these metrics to ensure the seeder is healthy and serving useful data:
 -   **`seeder.dns.response_peers`** (Histogram): Tracks how many peers are returned per query. A healthy seeder should consistently return near 25 peers. A shift to lower numbers indicates the address book is running dry of eligible peers.
 -   **`seeder.peers.total`** (Gauge): Raw size of the address book (includes unresponsive/unverified peers).
 
+## Deployment
+
+### Docker (Recommended)
+The project includes a `Dockerfile` and `docker-compose.yml` for easy deployment. The container uses a secure, minimal distroless image.
+
+**Using Docker Compose:**
+```bash
+docker-compose up -d
+```
+This will start the seeder on port `1053` (UDP/TCP).
+
+**Manual Docker Build:**
+```bash
+docker build -t zebra-seeder .
+docker run -d -p 1053:1053/udp -p 1053:1053/tcp zebra-seeder
+```
+
+**Configuration with Docker:**
+Pass environment variables to the container. See `docker-compose.yml` for examples.
+
 ## Roadmap
 - [x] Initial Scaffolding (Project setup, basic dependencies)
 - [x] Configuration System (Env vars, TOML, Defaults, Dotenv)

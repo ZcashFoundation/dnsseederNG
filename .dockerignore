@@ -1,0 +1,11 @@
+target/
+**/*.rs.bk
+.git/
+.env
+.github/
+.vscode/
+.idea/
+Dockerfile
+docker-compose.yml
+README.md
+task.md

@@ -1,0 +1,18 @@
+services:
+  seeder:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Map DNS ports (Host:Container)
+      # DNS over TCP is questionnably necessary
+      # note that clients will expect to connect to port 53, but we bind to 1053 to avoid needing to run as root
+      - "1053:1053/udp"
+      - "1053:1053/tcp"
+      # Metrics port (Uncomment to expose if enabled via env var)
+      - "9999:9999/tcp"
+    environment:
+      # Example configuration
+      # ZEBRA_SEEDER__NETWORK__NETWORK: "Testnet"
+      - ZEBRA_SEEDER__DNS_LISTEN_ADDR=0.0.0.0:1053
+      # Enable metrics by uncommenting:
+      - ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR=0.0.0.0:9999
