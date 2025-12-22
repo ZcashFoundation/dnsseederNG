@@ -22,7 +22,7 @@ To create a standalone binary that crawls the Zcash network using `zebra-network
 
 ### Running the Seeder
 ```bash
-cargo run -- start --verbose debug
+cargo run start
 ```
 
 ### Verifying DNS Responses
@@ -45,7 +45,7 @@ Configuration can be provided via a TOML file, environment variables, or a `.env
 Prefix with `ZEBRA_SEEDER__` (double underscore separator). 
 
 **Using `.env` file:**
-You can create a `.env` file in the project root to persit environment variables. See `[.env-example.txt](.env-example.txt)` for a template.
+You can create a `.env` file in the project root to persist environment variables. See [`.env-example.txt`](.env-example.txt) for a template.
 
 ```bash
 # Example .env content
@@ -62,14 +62,11 @@ ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
 
 ## Metrics (Observability)
 
-The seeder can expose Prometheus metrics. To enable them, add a `[metrics]` section to your configuration file:
+The seeder can expose Prometheus metrics. To enable them, uncomment this line in .env:
 
-```toml
-[metrics]
-endpoint_addr = "0.0.0.0:9999"
+```bash
+ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
 ```
-
-Or set the environment variable: `ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"`.
 
 Once enabled, metrics are available at `http://localhost:9999/metrics`.
 
