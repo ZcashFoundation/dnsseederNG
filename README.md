@@ -85,13 +85,30 @@ Monitor these metrics to ensure the seeder is healthy and serving useful data:
 ## Deployment
 
 ### Docker (Recommended)
-The project includes a `Dockerfile` and `docker-compose.yml` for easy deployment. The container uses a secure, minimal distroless image.
+The project includes a `Dockerfile` and `docker-compose.yml` for easy deployment. The container uses a `rust` builder and a `distroless` runtime, minimal distroless image (Debian 13 "Trixie" based).
 
-**Using Docker Compose:**
+**Quick Start:**
 ```bash
 docker-compose up -d
 ```
-This will start the seeder on port `1053` (UDP/TCP).
+This starts the seeder on port `1053` (UDP/TCP).
+
+**Production Best Practices:**
+
+1.  **Persistence**: Mount a volume for the address book cache to ensure peer data is retained across restarts.
+    ```yaml
+    volumes:
+      - ./data:/root/.cache/zebra/network
+    ```
+2.  **Resource Limits**: The seeder is lightweight, but it is good practice to set limits.
+    ```yaml
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+    ```
+3.  **Metrics**: Enable metrics in production for monitoring (see Metrics section).
 
 **Manual Docker Build:**
 ```bash
@@ -110,7 +127,7 @@ Pass environment variables to the container. See `docker-compose.yml` for exampl
 - [x] Implement Crawler Logic (Active peer discovery loop & monitoring)
 - [x] Metrics & Observability (Basic Prometheus exporter and tracing)
 - [x] CI/CD (GitHub Actions)
-- [ ] Deployment (Containerization)
-- [ ] Improve bootstrapping.  Add mechanism for seeder to be resilient in the face of failure of all other seeders, which is how the Zcash network bootstraps.  Perhaps allow a list of known good long lived peers to be specified in the config, and the seeder will try to connect to them in order to bootstrap. 
+- [x] Deployment (Containerization)
+- [ ] Improve bootstrapping (Resilience against seed failures) 
 
 
