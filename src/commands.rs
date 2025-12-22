@@ -1,7 +1,7 @@
-use clap::{Parser, Subcommand};
 use crate::config::SeederConfig;
+use clap::{Parser, Subcommand};
+use color_eyre::eyre::{Context, Result};
 use std::path::PathBuf;
-use color_eyre::eyre::{Result, Context};
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -40,9 +40,9 @@ impl SeederApp {
             Commands::Start => {
                 let config = SeederConfig::load_with_env(app.config)
                     .wrap_err("failed to load configuration")?;
-                
+
                 info!("Starting zebra-seeder with config: {:?}", config);
-                
+
                 // TODO: Initialize Async Skeleton & DNS Handler in next step
                 // For now, just keep the process alive or exit
                 crate::server::spawn(config).await?;

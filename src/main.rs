@@ -1,7 +1,7 @@
 use color_eyre::eyre::Result;
 
-pub mod config;
 pub mod commands;
+pub mod config;
 pub mod server;
 
 #[cfg(test)]

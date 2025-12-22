@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, time::Duration};
 use color_eyre::eyre::Result;
 use config::{Config, Environment, File};
+use serde::{Deserialize, Serialize};
+use std::{net::SocketAddr, time::Duration};
 
 /// Configuration for the Zebra Seeder.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -27,7 +27,9 @@ impl Default for SeederConfig {
     fn default() -> Self {
         Self {
             network: zebra_network::Config::default(),
-            dns_listen_addr: "0.0.0.0:53".parse().expect("hardcoded address must be valid"),
+            dns_listen_addr: "0.0.0.0:53"
+                .parse()
+                .expect("hardcoded address must be valid"),
             seed_domain: "mainnet.seeder.example.com".to_string(),
             crawl_interval: Duration::from_secs(600), // 10 minutes
         }
@@ -43,8 +45,7 @@ impl SeederConfig {
     /// 2. Config File (if path is provided)
     /// 3. Default Values
     pub fn load_with_env(path: Option<std::path::PathBuf>) -> Result<Self> {
-        let mut builder = Config::builder()
-            .add_source(Config::try_from(&Self::default())?);
+        let mut builder = Config::builder().add_source(Config::try_from(&Self::default())?);
 
         if let Some(path) = path {
             builder = builder.add_source(File::from(path));
@@ -71,6 +72,6 @@ impl SeederConfig {
     // In Zebrad, `load` usually implies just file + defaults, but here we generally want Env too.
     // For simplicity and matching typical app flow, strictly following the prompt's request for "load" and "load_with_env":
     pub fn load(path: std::path::PathBuf) -> Result<Self> {
-         Self::load_with_env(Some(path))
+        Self::load_with_env(Some(path))
     }
 }
