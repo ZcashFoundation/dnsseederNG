@@ -1,6 +1,6 @@
 use crate::config::SeederConfig;
-use color_eyre::eyre::{Result, Context}; // Keep Context even if unused for now, good practice
-use tower::{Service, ServiceExt};
+use color_eyre::eyre::Result; // Keep Context even if unused for now, good practice
+use tower::Service;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context as TaskContext, Poll};
@@ -52,7 +52,7 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
     // TODO: Actually bind the Hickory DNS server
     
-    let mut dns_service = DnsService::new(address_book.clone());
+    let _dns_service = DnsService::new(address_book.clone());
     
     tracing::info!("Seeder running. Press Ctrl+C to exit.");
     tokio::signal::ctrl_c().await?;

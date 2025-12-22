@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::Result;
 use config::{Config, Environment, File};
 
 /// Configuration for the Zebra Seeder.
