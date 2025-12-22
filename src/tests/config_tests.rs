@@ -1,6 +1,19 @@
 use crate::config::SeederConfig;
 use std::env;
 use std::time::Duration;
+use config::FileFormat;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn with_env_lock<F>(f: F) 
+where F: FnOnce() 
+{
+    let mutex = ENV_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    f();
+}
 
 #[test]
 fn test_default_config() {
@@ -12,34 +25,69 @@ fn test_default_config() {
 
 #[test]
 fn test_env_overrides() {
-    // Save original env to restore later (though tests run in parallel, this is flaky if not careful. 
-    // Ideally use `figment` or just run this test in isolation, but standard rust `env::set_var` is process global.)
-    // For this scaffolding, we'll try to use a unique prefix or just set and unset.
-    
-    env::set_var("ZEBRA_SEEDER__SEED_DOMAIN", "test.example.com");
-    env::set_var("ZEBRA_SEEDER__CRAWL_INTERVAL", "30s");
-    
-    // We can't really pass "None" path to `load_with_env` if we want JUST env, 
-    std::env::set_var("ZEBRA_SEEDER__CRAWL_INTERVAL", "5m");
-    
-    let config = SeederConfig::load_with_env(None).expect("should load");
-    
-    assert_eq!(config.seed_domain, "test.example.com");
-    assert_eq!(config.crawl_interval, std::time::Duration::from_secs(300));
-    
-    // Clean up
-    env::remove_var("ZEBRA_SEEDER__SEED_DOMAIN");
-    env::remove_var("ZEBRA_SEEDER__CRAWL_INTERVAL");
+    with_env_lock(|| {
+        env::set_var("ZEBRA_SEEDER__SEED_DOMAIN", "test.example.com");
+        env::set_var("ZEBRA_SEEDER__CRAWL_INTERVAL", "5m");
+        
+        let config = SeederConfig::load_with_env(None).expect("should load");
+        
+        assert_eq!(config.seed_domain, "test.example.com");
+        assert_eq!(config.crawl_interval, std::time::Duration::from_secs(300));
+        
+        // Clean up
+        env::remove_var("ZEBRA_SEEDER__SEED_DOMAIN");
+        env::remove_var("ZEBRA_SEEDER__CRAWL_INTERVAL");
+    });
 }
 
 #[test]
 fn test_config_loading_from_env_overrides_network() {
-    // Set environment variables
-    std::env::set_var("ZEBRA_SEEDER__NETWORK__NETWORK", "Testnet");
-    std::env::set_var("ZEBRA_SEEDER__DNS_LISTEN_ADDR", "0.0.0.0:1053");
+    with_env_lock(|| {
+        // Set environment variables
+        std::env::set_var("ZEBRA_SEEDER__NETWORK__NETWORK", "Testnet");
+        std::env::set_var("ZEBRA_SEEDER__DNS_LISTEN_ADDR", "0.0.0.0:1053");
+        
+        let config = SeederConfig::load_with_env(None).expect("should load");
+        
+        assert_eq!(config.network.network.to_string(), "Testnet");
+        assert_eq!(config.dns_listen_addr.port(), 1053);
+        
+        // Clean up
+        env::remove_var("ZEBRA_SEEDER__NETWORK__NETWORK");
+        env::remove_var("ZEBRA_SEEDER__DNS_LISTEN_ADDR");
+    });
+}
+
+#[test]
+fn test_crawl_interval_parsing() {
+    // Determine parsing logic without relying on Env Vars (avoiding races)
+    // We demonstrate that humantime_serde works via TOML source string
     
-    let config = SeederConfig::load_with_env(None).expect("should load");
+    // We can't easily load partial config into SeederConfig without valid structure, 
+    // but SeederConfig::load_with_env loads defaults first.
+    // Let's mimic what we want: override just command interval using a File source.
     
-    assert_eq!(config.network.network.to_string(), "Testnet");
-    assert_eq!(config.dns_listen_addr.port(), 1053);
+    let config_res = config::Config::builder()
+        .add_source(config::Config::try_from(&SeederConfig::default()).unwrap())
+        .add_source(config::File::from_str("crawl_interval = '1h 30m'", FileFormat::Toml))
+        .build();
+        
+    let config: SeederConfig = config_res.expect("build").try_deserialize().expect("deserialize");
+    assert_eq!(config.crawl_interval, Duration::from_secs(5400));
+    
+    let config_res2 = config::Config::builder()
+        .add_source(config::Config::try_from(&SeederConfig::default()).unwrap())
+        .add_source(config::File::from_str("crawl_interval = '10s'", FileFormat::Toml))
+        .build();
+    let config2: SeederConfig = config_res2.expect("build").try_deserialize().expect("deserialize");
+    assert_eq!(config2.crawl_interval, Duration::from_secs(10));
+}
+
+#[test]
+fn test_network_config_defaults() {
+    // Verify default network config logic through SeederConfig
+    let config = SeederConfig::default();
+    // Zebra network default listening port depends on network, but here we check our config wrapper defaults
+    // basic checks
+    assert_eq!(config.network.network.to_string(), "Mainnet");
 }

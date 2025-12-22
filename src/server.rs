@@ -48,11 +48,7 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
             
             // Log Address Book stats
             if let Ok(book) = address_book_monitor.lock() {
-                let total_peers = book.len();
-                tracing::info!(
-                    "Crawler Status: {} known peers in address book.", 
-                    total_peers
-                );
+                log_crawler_status(&book);
             } else {
                 tracing::warn!("Failed to lock address book for monitoring");
             }
@@ -89,6 +85,14 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     }
     
     Ok(())
+}
+
+fn log_crawler_status(book: &zebra_network::AddressBook) {
+    let total_peers = book.len();
+    tracing::info!(
+        "Crawler Status: {} known peers in address book.", 
+        total_peers
+    );
 }
 
 #[derive(Clone)]
