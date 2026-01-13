@@ -92,7 +92,7 @@ impl Default for SeederConfig {
                 .parse()
                 .expect("hardcoded address must be valid"),
             seed_domain: "mainnet.seeder.example.com".to_string(),
-            dns_ttl: 600, // 10 minutes
+            dns_ttl: 600,                             // 10 minutes
             crawl_interval: Duration::from_secs(600), // 10 minutes
             metrics: None,
             rate_limit: Some(RateLimitConfig::default()),

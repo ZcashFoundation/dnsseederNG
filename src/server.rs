@@ -21,7 +21,17 @@ use tracing::{info_span, Instrument};
 
 /// Per-IP rate limiter for DNS queries
 struct RateLimiter {
-    limiters: DashMap<IpAddr, Arc<GovernorLimiter<governor::state::direct::NotKeyed, InMemoryState, governor::clock::DefaultClock, governor::middleware::NoOpMiddleware>>>,
+    limiters: DashMap<
+        IpAddr,
+        Arc<
+            GovernorLimiter<
+                governor::state::direct::NotKeyed,
+                InMemoryState,
+                governor::clock::DefaultClock,
+                governor::middleware::NoOpMiddleware,
+            >,
+        >,
+    >,
     quota: Quota,
 }
 
@@ -90,7 +100,9 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
             let book = match address_book_monitor.lock() {
                 Ok(guard) => guard,
                 Err(poisoned) => {
-                    tracing::error!("Address book mutex poisoned during crawler monitoring, recovering");
+                    tracing::error!(
+                        "Address book mutex poisoned during crawler monitoring, recovering"
+                    );
                     counter!("seeder.mutex_poisoning_total", "location" => "crawler").increment(1);
                     poisoned.into_inner()
                 }
@@ -144,28 +156,28 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
         result = server.block_until_done() => {
             result.wrap_err("DNS server crashed")?;
             tracing::info!("DNS server stopped, shutting down...");
-            
+
             // Clean up crawler task
             crawler_handle.abort();
-            
+
             // Brief delay to allow cleanup
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received shutdown signal, cleaning up...");
-            
+
             // Abort the crawler task
             crawler_handle.abort();
-            
+
             // Note: ServerFuture doesn't have a graceful shutdown method,
             // so we rely on the Drop implementation to clean up sockets
-            
+
             // Brief delay to allow:
             // - Crawler task to finish aborting
             // - Any in-flight DNS responses to complete
             // - Metrics to flush (PrometheusBuilder handles this internally)
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            
+
             tracing::info!("Cleanup complete");
         }
     }
@@ -288,7 +300,7 @@ impl SeederAuthority {
             let name_s = name.to_ascii();
             let name_norm = name_s.trim_end_matches('.');
             let seed_norm = self.seed_domain.trim_end_matches('.');
-            
+
             if name_norm != seed_norm && !name_norm.ends_with(&format!(".{}", seed_norm)) {
                 // Return REFUSED
                 header.set_response_code(ResponseCode::Refused);
@@ -309,7 +321,8 @@ impl SeederAuthority {
                         tracing::error!(
                             "Address book mutex poisoned during DNS query handling, recovering"
                         );
-                        counter!("seeder.mutex_poisoning_total", "location" => "dns_handler").increment(1);
+                        counter!("seeder.mutex_poisoning_total", "location" => "dns_handler")
+                            .increment(1);
                         poisoned.into_inner()
                     }
                 };
@@ -330,21 +343,23 @@ impl SeederAuthority {
 
                 // Filter and collect up to 50 eligible peers (more than we need for shuffle randomness)
                 // This avoids allocating a vector for ALL peers in the address book
-                let mut matched_peers: Vec<_> = book.peers()
+                let mut matched_peers: Vec<_> = book
+                    .peers()
                     .filter(|meta| {
                         let ip = meta.addr().ip();
-                        
+
                         // 1. Routability check
-                        let is_global = !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+                        let is_global =
+                            !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
                         if !is_global {
                             return false;
                         }
-                        
+
                         // 2. Port check
                         if meta.addr().port() != default_port {
                             return false;
                         }
-                        
+
                         // 3. Address family check
                         match record_type {
                             RecordType::A => ip.is_ipv4(),
@@ -360,7 +375,10 @@ impl SeederAuthority {
                 matched_peers.truncate(MAX_DNS_RESPONSE_PEERS);
 
                 // Copy the socket addresses so we can drop the lock
-                matched_peers.iter().map(|peer| peer.addr()).collect::<Vec<_>>()
+                matched_peers
+                    .iter()
+                    .map(|peer| peer.addr())
+                    .collect::<Vec<_>>()
                 // MutexGuard is dropped here
             };
 
@@ -369,9 +387,7 @@ impl SeederAuthority {
             for addr in matched_peers {
                 let rdata = match addr.ip() {
                     std::net::IpAddr::V4(ipv4) => RData::A(hickory_proto::rr::rdata::A(ipv4)),
-                    std::net::IpAddr::V6(ipv6) => {
-                        RData::AAAA(hickory_proto::rr::rdata::AAAA(ipv6))
-                    }
+                    std::net::IpAddr::V6(ipv6) => RData::AAAA(hickory_proto::rr::rdata::AAAA(ipv6)),
                 };
 
                 let record = Record::from_rdata(name.clone().into(), self.dns_ttl, rdata);

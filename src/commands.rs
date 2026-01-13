@@ -46,7 +46,7 @@ impl SeederApp {
                 if let Some(ref metrics_config) = config.metrics {
                     crate::metrics::init(metrics_config.endpoint_addr)?;
                 }
-                
+
                 crate::server::spawn(config).await?;
             }
         }
