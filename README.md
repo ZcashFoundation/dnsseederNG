@@ -79,6 +79,7 @@ Monitor these metrics to ensure the seeder is healthy and serving useful data:
 -   **`seeder.dns.errors_total`** (Counter): Should be near zero. Spikes indicate socket handling issues.
 -   **`seeder.dns.response_peers`** (Histogram): Tracks how many peers are returned per query. A healthy seeder should consistently return near 25 peers. A shift to lower numbers indicates the address book is running dry of eligible peers.
 -   **`seeder.peers.total`** (Gauge): Raw size of the address book (includes unresponsive/unverified peers).
+-   **`seeder.mutex_poisoning_total`** (Counter, labels: `crawler`, `dns_handler`): **Critical**. Should always be zero. Any non-zero value indicates a serious issue where a thread panicked while holding the address book lock. Investigate immediately and consider restarting the service.
 
 ## Deployment
 

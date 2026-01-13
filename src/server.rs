@@ -54,11 +54,15 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
             tracing::info!("Starting network crawl...");
 
             // Log Address Book stats
-            if let Ok(book) = address_book_monitor.lock() {
-                log_crawler_status(&book, default_port);
-            } else {
-                tracing::warn!("Failed to lock address book for monitoring");
-            }
+            let book = match address_book_monitor.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => {
+                    tracing::error!("Address book mutex poisoned during crawler monitoring, recovering");
+                    counter!("seeder.mutex_poisoning_total", "location" => "crawler").increment(1);
+                    poisoned.into_inner()
+                }
+            };
+            log_crawler_status(&book, default_port);
         }
     });
 
@@ -246,7 +250,19 @@ impl SeederAuthority {
 
             let mut records = Vec::new();
 
-            if let Ok(book) = self.address_book.lock() {
+            // Collect peer data while holding the lock, then drop the guard
+            let matched_peers = {
+                let book = match self.address_book.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        tracing::error!(
+                            "Address book mutex poisoned during DNS query handling, recovering"
+                        );
+                        counter!("seeder.mutex_poisoning_total", "location" => "dns_handler").increment(1);
+                        poisoned.into_inner()
+                    }
+                };
+
                 // Get verified peers (using reconnection_peers or similar if verified() is strictly "verified by zebra-network connection")
                 // `reconnection_peers()` returns MetaAddrs that are good for connection.
                 // However, the prompt says "select a random subset".
@@ -274,19 +290,23 @@ impl SeederAuthority {
                 matched_peers.shuffle(&mut rng());
                 matched_peers.truncate(25);
 
-                histogram!("seeder.dns.response_peers").record(matched_peers.len() as f64);
+                // Clone the socket addresses so we can drop the lock
+                matched_peers.iter().map(|peer| peer.addr()).collect::<Vec<_>>()
+                // MutexGuard is dropped here
+            };
 
-                for peer in matched_peers {
-                    let rdata = match peer.addr().ip() {
-                        std::net::IpAddr::V4(ipv4) => RData::A(hickory_proto::rr::rdata::A(ipv4)),
-                        std::net::IpAddr::V6(ipv6) => {
-                            RData::AAAA(hickory_proto::rr::rdata::AAAA(ipv6))
-                        }
-                    };
+            histogram!("seeder.dns.response_peers").record(matched_peers.len() as f64);
 
-                    let record = Record::from_rdata(name.clone().into(), 600, rdata); // 600s TTL default
-                    records.push(record);
-                }
+            for addr in matched_peers {
+                let rdata = match addr.ip() {
+                    std::net::IpAddr::V4(ipv4) => RData::A(hickory_proto::rr::rdata::A(ipv4)),
+                    std::net::IpAddr::V6(ipv6) => {
+                        RData::AAAA(hickory_proto::rr::rdata::AAAA(ipv6))
+                    }
+                };
+
+                let record = Record::from_rdata(name.clone().into(), 600, rdata); // 600s TTL default
+                records.push(record);
             }
 
             match record_type {
