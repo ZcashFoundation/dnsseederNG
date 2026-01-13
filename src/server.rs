@@ -1,6 +1,6 @@
 use crate::config::SeederConfig;
 use color_eyre::eyre::{Context, Result};
-use hickory_proto::op::Header;
+use hickory_proto::op::{Header, ResponseCode};
 use hickory_proto::rr::{RData, Record, RecordType};
 use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::server::{RequestHandler, ResponseHandler, ResponseInfo};
@@ -64,7 +64,7 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
     tracing::info!("Initializing DNS server on {}", config.dns_listen_addr);
 
-    let authority = SeederAuthority::new(address_book, config.network.network);
+    let authority = SeederAuthority::new(address_book, config.network.network, config.seed_domain.clone());
     let mut server = ServerFuture::new(authority);
 
     // Register UDP and TCP listeners
@@ -136,16 +136,19 @@ fn log_crawler_status(book: &zebra_network::AddressBook, default_port: u16) {
 pub struct SeederAuthority {
     address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
     network: zebra_chain::parameters::Network,
+    seed_domain: String,
 }
 
 impl SeederAuthority {
     fn new(
         address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
         network: zebra_chain::parameters::Network,
+        seed_domain: String,
     ) -> Self {
         Self {
             address_book,
             network,
+            seed_domain,
         }
     }
 
@@ -227,11 +230,19 @@ impl SeederAuthority {
             let record_type = query.query_type();
 
             // Check if we should answer this query
-            // Ideally we check if `name` matches our seed domain, but for a dedicated seeder
-            // running on a specific IP, we might just answer everything or filter.
-            // For now, let's assume we answer for any domain routed to us,
-            // OR we could check config.seed_domain if passed in.
-            // Given the prompt didn't specify strict domain filtering, we'll answer.
+            let name_s = name.to_ascii();
+            let name_norm = name_s.trim_end_matches('.');
+            let seed_norm = self.seed_domain.trim_end_matches('.');
+            
+            if name_norm != seed_norm && !name_norm.ends_with(&format!(".{}", seed_norm)) {
+                // Return REFUSED
+                header.set_response_code(ResponseCode::Refused);
+                let response = builder.build(header, &[], &[], &[], &[]);
+                return response_handle
+                    .send_response(response)
+                    .await
+                    .unwrap_or_else(|_| ResponseInfo::from(header));
+            }
 
             let mut records = Vec::new();
 
