@@ -6,7 +6,7 @@ A Rust-based DNS seeder for the Zcash network, mirroring patterns from the [Zebr
 To create a standalone binary that crawls the Zcash network using `zebra-network` and serves A/AAAA records using `hickory-dns`.
 
 ## Status
-**Current State**: DNS Server Active
+**Current State**: Testing, awaiting code review, not production ready
 
 ### Completed Features
 - **Project Structure**: Initialized with `tokio`, `zebra-network`, `zebra-chain`, and `hickory-dns`.
@@ -50,6 +50,7 @@ You can create a `.env` file in the project root to persist environment variable
 ```bash
 # Example .env content
 ZEBRA_SEEDER__NETWORK__NETWORK="Mainnet"
+# note: For production access, DNS server will need to be exposed on UDP/53, which is a privileged port.  Alternately, a reverse proxy or port forwarding can be used to forward production traffic to the seeder.
 ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:1053"
 ZEBRA_SEEDER__SEED_DOMAIN="mainnet.seeder.example.com"
 ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
@@ -88,7 +89,7 @@ The project includes a `Dockerfile` and `docker-compose.yml` for easy deployment
 ```bash
 docker-compose up -d
 ```
-This starts the seeder on port `1053` (UDP/TCP).
+This starts the seeder on port `1053` (UDP/TCP).  Note that for production, this will need to be set to port `53` (UDP/TCP) or a reverse proxy or port forwarding rule will need to be added to forward traffic to port `1053`.
 
 **Production Best Practices:**
 
@@ -128,4 +129,5 @@ Pass environment variables to the container. See `docker-compose.yml` for exampl
 - [ ] Improve bootstrapping (Resilience against seed failures) 
 
 ## Known Issues
-- [ ] DNS server not accessible over udp/1053 when running in docker.  May be distroless related.
+- [X] DNS server not accessible over udp/1053 when running in docker.  May be distroless related.  Issue was determined to be related to local workstation MacOS / Colima / Docker interaction and is not reproducible in a production container environment.
+

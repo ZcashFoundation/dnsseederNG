@@ -6,10 +6,13 @@ services:
       # Map DNS ports (Host:Container)
       # DNS over TCP is questionnably necessary
       # note that clients will expect to connect to port 53, but we bind to 1053 to avoid needing to run as root
+      # for prod use expose ports 53/udp and 53/tcp OR use a reverse proxy or upstream port forwarding rules to forward traffic to port 1053
       - "1053:1053/udp"
       - "1053:1053/tcp"
       # Metrics port (Uncomment to expose if enabled via env var)
       - "9999:9999/tcp"
+    volumes:
+      - ./cache:/root/.cache/zebra/network
     environment:
       # Example configuration
       - ZEBRA_SEEDER__NETWORK__NETWORK=Testnet
