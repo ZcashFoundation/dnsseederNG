@@ -170,6 +170,10 @@ pub struct SeederAuthority {
     dns_ttl: u32,
 }
 
+// DNS response configuration
+const MAX_DNS_RESPONSE_PEERS: usize = 25;
+const PEER_SELECTION_POOL_SIZE: usize = 50; // Collect 2x peers for shuffle randomness
+
 impl SeederAuthority {
     fn new(
         address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
@@ -285,12 +289,12 @@ impl SeederAuthority {
                             _ => false,
                         }
                     })
-                    .take(50)  // Only take 50 eligible peers (we need 25, this gives shuffle randomness)
+                    .take(PEER_SELECTION_POOL_SIZE)
                     .collect::<Vec<_>>();
 
-                // Shuffle and take 25
+                // Shuffle and take the configured maximum
                 matched_peers.shuffle(&mut rng());
-                matched_peers.truncate(25);
+                matched_peers.truncate(MAX_DNS_RESPONSE_PEERS);
 
                 // Copy the socket addresses so we can drop the lock
                 matched_peers.iter().map(|peer| peer.addr()).collect::<Vec<_>>()
