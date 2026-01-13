@@ -326,7 +326,8 @@ impl SeederAuthority {
                     return response_handle
                         .send_response(response)
                         .await
-                        .inspect_err(|_e| {
+                        .inspect_err(|e| {
+                            tracing::warn!("Failed to send DNS response: {}", e);
                             counter!("seeder.dns.errors_total").increment(1);
                         })
                         .unwrap_or_else(|_| {
