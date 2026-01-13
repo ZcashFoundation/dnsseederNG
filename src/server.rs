@@ -41,7 +41,7 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     let address_book_monitor = address_book.clone();
     let default_port = config.network.network.default_port();
 
-    let _crawler_handle = tokio::spawn(async move {
+    let crawler_handle = tokio::spawn(async move {
         // Keep peer_set alive in the crawler task to ensure the network stack keeps running
         let _keep_alive = peer_set;
 
@@ -91,9 +91,30 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     tokio::select! {
         result = server.block_until_done() => {
             result.wrap_err("DNS server crashed")?;
+            tracing::info!("DNS server stopped, shutting down...");
+            
+            // Clean up crawler task
+            crawler_handle.abort();
+            
+            // Brief delay to allow cleanup
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         _ = tokio::signal::ctrl_c() => {
-            tracing::info!("Shutting down...");
+            tracing::info!("Received shutdown signal, cleaning up...");
+            
+            // Abort the crawler task
+            crawler_handle.abort();
+            
+            // Note: ServerFuture doesn't have a graceful shutdown method,
+            // so we rely on the Drop implementation to clean up sockets
+            
+            // Brief delay to allow:
+            // - Crawler task to finish aborting
+            // - Any in-flight DNS responses to complete
+            // - Metrics to flush (PrometheusBuilder handles this internally)
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            
+            tracing::info!("Cleanup complete");
         }
     }
 
