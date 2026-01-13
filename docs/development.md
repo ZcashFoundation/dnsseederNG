@@ -1,0 +1,288 @@
+# Development Guide
+
+Guide for contributors and developers working on zebra-seeder.
+
+## Getting Started
+
+### Prerequisites
+
+- Rust 1.70+ (`rustup update stable`)
+- Git
+- Docker (optional, for testing)
+
+### Clone and Build
+
+```bash
+git clone https://github.com/alchemydc/dnsseederNG
+cd dnsseederNG
+cargo build
+```
+
+### Running Locally
+
+```bash
+# Copy example environment file
+cp .env-example.txt .env
+
+# Edit .env for testnet (uses port 1053 to avoid requiring root)
+# ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:1053"
+# ZEBRA_SEEDER__NETWORK__NETWORK="Testnet"
+# ZEBRA_SEEDER__SEED_DOMAIN="testnet.seeder.example.com"
+
+# Run
+cargo run start
+
+# Test in another terminal
+dig @127.0.0.1 -p 1053 testnet.seeder.example.com A
+```
+
+## Project Structure
+
+```
+zebra-seeder/
+├── src/
+│   ├── main.rs           # Entry point
+│   ├── commands.rs       # CLI command handling
+│   ├── config.rs         # Configuration structures
+│   ├── server.rs         # DNS server + crawler logic
+│   ├── metrics.rs        # Prometheus metrics setup
+│   └── tests/            # Unit tests
+│       ├── mod.rs
+│       ├── cli_tests.rs
+│       └── config_tests.rs
+├── docs/                 # Documentation
+├── Dockerfile            # Container image
+├── docker-compose.yml    # Docker orchestration
+├── Cargo.toml            # Dependencies
+└── build.rs              # Build script (vergen)
+```
+
+### Key Files
+
+- **`main.rs`**: Entry point, error handling setup
+- **`commands.rs`**: CLI parsing, config loading, server initialization
+- **`config.rs`**: `SeederConfig` struct, configuration loading
+- **`server.rs`**: Core logic - DNS server, rate limiting, crawler
+- **`metrics.rs`**: Prometheus metrics initialization
+
+## Code Overview
+
+### Main Components
+
+**Configuration (`config.rs`):**
+- `SeederConfig`: Main config struct
+- `RateLimitConfig`: Rate limiting settings
+- `MetricsConfig`: Metrics endpoint settings
+- Serde deserialization from env vars/TOML
+
+**Server (`server.rs`):**
+- `spawn()`: Main server initialization
+- `RateLimiter`: Per-IP rate limiting
+- `SeederAuthority`: DNS request handler (implements `RequestHandler`)
+- `log_crawler_status()`: Crawler monitoring
+- Peer filtering and shuffling logic
+
+**Commands (`commands.rs`):**
+- CLI structure with clap
+- Config loading orchestration
+- Server spawning
+
+## Testing
+
+### Run All Tests
+
+```bash
+cargo test
+```
+
+### Run Specific Test
+
+```bash
+cargo test test_rate_limit_default
+```
+
+### Test Structure
+
+- **Unit tests**: In `src/tests/*.rs`
+- **Config tests**: `config_tests.rs` (env var handling, defaults)
+- **CLI tests**: `cli_tests.rs` (argument parsing)
+
+### Adding Tests
+
+Add new tests to appropriate file in `src/tests/`:
+
+```rust
+#[test]
+fn test_new_feature() {
+    // Your test here
+}
+```
+
+For config tests with env vars, use `with_env_lock`:
+
+```rust
+#[test]
+fn test_my_config() {
+    with_env_lock(|| {
+        env::set_var("ZEBRA_SEEDER__MY_PARAM", "value");
+        let config = SeederConfig::load_with_env(None).unwrap();
+        assert_eq!(config.my_param, "value");
+        env::remove_var("ZEBRA_SEEDER__MY_PARAM");
+    });
+}
+```
+
+## Code Style
+
+### Formatting
+
+```bash
+# Auto-format code
+cargo fmt
+
+# Check formatting
+cargo fmt --check
+```
+
+### Linting
+
+```bash
+# Run clippy
+cargo clippy -- -D warnings
+```
+
+### Pre-commit Checks
+
+```bash
+# Run all checks (format, clippy, build, test)
+./commit_checks.sh
+```
+
+## Contributing
+
+### Workflow
+
+1. **Fork** the repository
+2. **Create branch**: `git checkout -b feature/my-feature`
+3. **Make changes** and add tests
+4. **Run checks**: `./commit_checks.sh`
+5. **Commit**: `git commit -m "feat: add new feature"`
+6. **Push**: `git push origin feature/my-feature`
+7. **Open PR** with description
+
+### Commit Message Format
+
+Follow conventional commits:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+**Types:**
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation only
+- `style`: Formatting, no code change
+- `refactor`: Code change that neither fixes bug nor adds feature
+- `test`: Adding tests
+- `chore`: Maintenance
+
+**Examples:**
+```
+feat(rate-limit): add configurable burst size
+fix(dns): handle empty peer list correctly
+docs: update deployment guide
+```
+
+## Common Development Tasks
+
+### Adding New Configuration Parameter
+
+1. Add field to `SeederConfig` in `src/config.rs`:
+```rust
+pub struct SeederConfig {
+    // ...
+    pub my_param: String,
+}
+```
+
+2. Update `Default` impl:
+```rust
+impl Default for SeederConfig {
+    fn default() -> Self {
+        Self {
+            // ...
+            my_param: "default_value".to_string(),
+        }
+    }
+}
+```
+
+3. Add test in `src/tests/config_tests.rs`:
+```rust
+#[test]
+fn test_my_param_default() {
+    let config = SeederConfig::default();
+    assert_eq!(config.my_param, "default_value");
+}
+```
+
+4. Document in `docs/operations.md` configuration table
+
+### Adding New Metric
+
+1. Add metric in relevant location (e.g., `src/server.rs`):
+```rust
+use metrics::{counter, gauge, histogram};
+
+counter!("seeder.my_metric_total").increment(1);
+gauge!("seeder.my_gauge").set(42.0);
+histogram!("seeder.my_histogram").record(10.5);
+```
+
+2. Document in `docs/operations.md` metrics table
+
+### Debugging
+
+**Enable debug logging:**
+```bash
+RUST_LOG=debug cargo run start
+```
+
+**Trace-level (very verbose):**
+```bash
+RUST_LOG=zebra_seeder=trace cargo run start
+```
+
+**Filter by module:**
+```bash
+RUST_LOG=zebra_seeder::server=debug cargo run start
+```
+
+## Release Process
+
+1. **Update version** in `Cargo.toml`
+2. **Update CHANGELOG.md** with changes
+3. **Run checks**: `./commit_checks.sh`
+4. **Commit**: `git commit -m "chore: release v1.2.3"`
+5. **Tag**: `git tag -a v1.2.3 -m "Release v1.2.3"`
+6. **Push**: `git push && git push --tags`
+7. **Build release**: `cargo build --release`
+8. **Create GitHub release** with binaries
+
+## Useful Resources
+
+- [Zebra Project](https://github.com/ZcashFoundation/zebra) - Zcash full node
+- [hickory-dns Docs](https://docs.rs/hickory-dns/) - DNS server library
+- [governor Docs](https://docs.rs/governor/) - Rate limiting
+- [Zcash Protocol Spec](https://zips.z.cash/protocol/protocol.pdf)
+
+## Getting Help
+
+- Open an issue on GitHub
+- Join Zcash community channels
+- Read through existing code and tests

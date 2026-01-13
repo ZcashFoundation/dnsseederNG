@@ -1,9 +1,6 @@
-# zebra-seeder
+# dnsseederNG
 
 A Rust-based DNS seeder for the Zcash network, mirroring patterns from the [Zebra](https://github.com/zcashfoundation/zebra) project.
-
-## Objective
-To create a standalone binary that crawls the Zcash network using `zebra-network` and serves A/AAAA records using `hickory-dns`.
 
 ## Status
 **Current State**: Testing, awaiting code review, not production ready
@@ -16,7 +13,18 @@ To create a standalone binary that crawls the Zcash network using `zebra-network
 - **Async Runtime**: Basic `tokio` orchestration with `tracing` for logging.
 - **Crawler**: Active network crawler with address book monitoring.
 - **DNS Server**: Authoritative DNS server serving A/AAAA records from filtered peers.
+- **Rate Limiting**: Per-IP rate limiting to prevent DNS amplification attacks.
 - **Testing**: Unit tests for configuration loading and CLI argument parsing.
+
+## Documentation
+
+**📚 [Complete Documentation →](docs/)**
+
+- **[Architecture](docs/architecture.md)** - System design, components, data flows, and architecture decisions
+- **[Operations](docs/operations.md)** - Configuration, deployment, and monitoring guide
+- **[Development](docs/development.md)** - Contributing and development guide
+
+For team members reviewing the code, start with [Architecture](docs/architecture.md) to understand the design decisions.
 
 ## Usage
 
@@ -127,8 +135,8 @@ This starts the seeder on port `1053` (UDP/TCP).  Note that for production, this
 
 **Manual Docker Build:**
 ```bash
-docker build -t zebra-seeder .
-docker run -d -p 1053:1053/udp -p 1053:1053/tcp zebra-seeder
+docker build -t dnsseederNG .
+docker run -d -p 1053:1053/udp -p 1053:1053/tcp dnsseederNG
 ```
 
 **Configuration with Docker:**
