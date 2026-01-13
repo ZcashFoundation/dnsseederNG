@@ -18,6 +18,15 @@ pub struct SeederConfig {
     /// The domain name the seeder is authoritative for.
     pub seed_domain: String,
 
+    /// DNS response TTL (Time To Live) in seconds.
+    ///
+    /// Controls how long clients cache DNS responses.
+    /// Lower values mean fresher data but more queries.
+    /// Higher values reduce query load but slower updates.
+    ///
+    /// Defaults to `600` (10 minutes).
+    pub dns_ttl: u32,
+
     /// Duration between refreshing the address book.
     #[serde(with = "humantime_serde")]
     pub crawl_interval: Duration,
@@ -54,6 +63,7 @@ impl Default for SeederConfig {
                 .parse()
                 .expect("hardcoded address must be valid"),
             seed_domain: "mainnet.seeder.example.com".to_string(),
+            dns_ttl: 600, // 10 minutes
             crawl_interval: Duration::from_secs(600), // 10 minutes
             metrics: None,
         }

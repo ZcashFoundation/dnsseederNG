@@ -68,7 +68,12 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
     tracing::info!("Initializing DNS server on {}", config.dns_listen_addr);
 
-    let authority = SeederAuthority::new(address_book, config.network.network, config.seed_domain.clone());
+    let authority = SeederAuthority::new(
+        address_book,
+        config.network.network,
+        config.seed_domain.clone(),
+        config.dns_ttl,
+    );
     let mut server = ServerFuture::new(authority);
 
     // Register UDP and TCP listeners
@@ -162,6 +167,7 @@ pub struct SeederAuthority {
     address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
     network: zebra_chain::parameters::Network,
     seed_domain: String,
+    dns_ttl: u32,
 }
 
 impl SeederAuthority {
@@ -169,11 +175,13 @@ impl SeederAuthority {
         address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
         network: zebra_chain::parameters::Network,
         seed_domain: String,
+        dns_ttl: u32,
     ) -> Self {
         Self {
             address_book,
             network,
             seed_domain,
+            dns_ttl,
         }
     }
 
@@ -326,7 +334,7 @@ impl SeederAuthority {
                     }
                 };
 
-                let record = Record::from_rdata(name.clone().into(), 600, rdata); // 600s TTL default
+                let record = Record::from_rdata(name.clone().into(), self.dns_ttl, rdata);
                 records.push(record);
             }
 

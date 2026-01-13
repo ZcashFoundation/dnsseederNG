@@ -21,6 +21,7 @@ fn test_default_config() {
     let config = SeederConfig::default();
     assert_eq!(config.dns_listen_addr.to_string(), "0.0.0.0:53");
     assert_eq!(config.seed_domain, "mainnet.seeder.example.com");
+    assert_eq!(config.dns_ttl, 600);
     assert_eq!(config.crawl_interval, Duration::from_secs(600));
 }
 
@@ -103,4 +104,18 @@ fn test_network_config_defaults() {
     // Zebra network default listening port depends on network, but here we check our config wrapper defaults
     // basic checks
     assert_eq!(config.network.network.to_string(), "Mainnet");
+}
+
+#[test]
+fn test_dns_ttl_from_env() {
+    with_env_lock(|| {
+        env::set_var("ZEBRA_SEEDER__DNS_TTL", "300");
+
+        let config = SeederConfig::load_with_env(None).expect("should load");
+
+        assert_eq!(config.dns_ttl, 300);
+
+        // Clean up
+        env::remove_var("ZEBRA_SEEDER__DNS_TTL");
+    });
 }

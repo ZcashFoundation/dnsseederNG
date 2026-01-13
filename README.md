@@ -52,9 +52,22 @@ You can create a `.env` file in the project root to persist environment variable
 ZEBRA_SEEDER__NETWORK__NETWORK="Mainnet"
 # note: For production access, DNS server will need to be exposed on UDP/53, which is a privileged port.  Alternately, a reverse proxy or port forwarding can be used to forward production traffic to the seeder.
 ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:1053"
+ZEBRA_SEEDER__DNS_TTL="600"
 ZEBRA_SEEDER__SEED_DOMAIN="mainnet.seeder.example.com"
 ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
 ```
+
+### Configuration Parameters
+
+| Parameter | Environment Variable | Default | Description |
+|-----------|---------------------|---------|-------------|
+| `dns_listen_addr` | `ZEBRA_SEEDER__DNS_LISTEN_ADDR` | `0.0.0.0:53` | DNS server listening address and port |
+| `dns_ttl` | `ZEBRA_SEEDER__DNS_TTL` | `600` | DNS response TTL in seconds. Controls how long clients cache responses. Lower values (e.g., 300) provide fresher data but increase query load. Higher values (e.g., 1800) reduce load but slower updates. |
+| `seed_domain` | `ZEBRA_SEEDER__SEED_DOMAIN` | `mainnet.seeder.example.com` | Domain name the seeder is authoritative for |
+| `crawl_interval` | `ZEBRA_SEEDER__CRAWL_INTERVAL` | `600` (10 minutes) | Duration between network crawls (supports humantime format like "10m" or "1h") |
+| `network.network` | `ZEBRA_SEEDER__NETWORK__NETWORK` | `Mainnet` | Zcash network to connect to (`Mainnet` or `Testnet`) |
+| `metrics.endpoint_addr` | `ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR` | (disabled) | Prometheus metrics endpoint address. Omit to disable metrics. |
+
 
 ## Architecture
 - **Networking**: Uses `zebra-network` for peer discovery and management.
