@@ -35,6 +35,11 @@ pub struct SeederConfig {
     ///
     /// If `None`, metrics are disabled.
     pub metrics: Option<MetricsConfig>,
+
+    /// Rate limiting configuration.
+    ///
+    /// If `None`, rate limiting is disabled (NOT recommended for production).
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 /// Configuration for Prometheus metrics.
@@ -55,6 +60,30 @@ impl Default for MetricsConfig {
     }
 }
 
+/// Configuration for DNS query rate limiting.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct RateLimitConfig {
+    /// Maximum queries per second per IP address.
+    ///
+    /// Defaults to `10`.
+    pub queries_per_second: u32,
+
+    /// Burst capacity (maximum queries in a short burst).
+    ///
+    /// Defaults to `20` (2x the rate).
+    pub burst_size: u32,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            queries_per_second: 10,
+            burst_size: 20,
+        }
+    }
+}
+
 impl Default for SeederConfig {
     fn default() -> Self {
         Self {
@@ -66,6 +95,7 @@ impl Default for SeederConfig {
             dns_ttl: 600, // 10 minutes
             crawl_interval: Duration::from_secs(600), // 10 minutes
             metrics: None,
+            rate_limit: Some(RateLimitConfig::default()),
         }
     }
 }

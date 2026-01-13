@@ -50,7 +50,7 @@ You can create a `.env` file in the project root to persist environment variable
 ```bash
 # Example .env content
 ZEBRA_SEEDER__NETWORK__NETWORK="Mainnet"
-# note: For production access, DNS server will need to be exposed on UDP/53, which is a privileged port.  Alternately, a reverse proxy or port forwarding can be used to forward production traffic to the seeder.
+# note: For production access, DNS server will need to be exposed on UDP/53, which is a privileged port.  Alternately, port forwarding can be used to forward production traffic to the seeder.
 ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:1053"
 ZEBRA_SEEDER__DNS_TTL="600"
 ZEBRA_SEEDER__SEED_DOMAIN="mainnet.seeder.example.com"
@@ -67,6 +67,8 @@ ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
 | `crawl_interval` | `ZEBRA_SEEDER__CRAWL_INTERVAL` | `600` (10 minutes) | Duration between network crawls (supports humantime format like "10m" or "1h") |
 | `network.network` | `ZEBRA_SEEDER__NETWORK__NETWORK` | `Mainnet` | Zcash network to connect to (`Mainnet` or `Testnet`) |
 | `metrics.endpoint_addr` | `ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR` | (disabled) | Prometheus metrics endpoint address. Omit to disable metrics. |
+| `rate_limit.queries_per_second` | `ZEBRA_SEEDER__RATE_LIMIT__QUERIES_PER_SECOND` | `10` | Maximum DNS queries per second per IP address. Prevents DNS amplification attacks. |
+| `rate_limit.burst_size` | `ZEBRA_SEEDER__RATE_LIMIT__BURST_SIZE` | `20` | Burst capacity for short traffic spikes (typically 2x the rate limit). |
 
 
 ## Architecture
@@ -91,6 +93,7 @@ Monitor these metrics to ensure the seeder is healthy and serving useful data:
 -   **`seeder.dns.queries_total`** (Counter, labels: `A`, `AAAA`): Traffic volume.
 -   **`seeder.dns.errors_total`** (Counter): Should be near zero. Spikes indicate socket handling issues.
 -   **`seeder.dns.response_peers`** (Histogram): Tracks how many peers are returned per query. A healthy seeder should consistently return near 25 peers. A shift to lower numbers indicates the address book is running dry of eligible peers.
+-   **`seeder.dns.rate_limited_total`** (Counter): **Important**. Tracks queries blocked by rate limiting. High values may indicate an attack or legitimate clients being rate-limited (adjust limits if needed).
 -   **`seeder.peers.total`** (Gauge): Raw size of the address book (includes unresponsive/unverified peers).
 -   **`seeder.mutex_poisoning_total`** (Counter, labels: `crawler`, `dns_handler`): **Critical**. Should always be zero. Any non-zero value indicates a serious issue where a thread panicked while holding the address book lock. Investigate immediately and consider restarting the service.
 

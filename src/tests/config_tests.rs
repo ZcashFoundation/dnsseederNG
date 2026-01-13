@@ -119,3 +119,31 @@ fn test_dns_ttl_from_env() {
         env::remove_var("ZEBRA_SEEDER__DNS_TTL");
     });
 }
+
+#[test]
+fn test_rate_limit_default() {
+    let config = SeederConfig::default();
+    assert!(config.rate_limit.is_some());
+    let rl = config.rate_limit.unwrap();
+    assert_eq!(rl.queries_per_second, 10);
+    assert_eq!(rl.burst_size, 20);
+}
+
+#[test]
+fn test_rate_limit_from_env() {
+    with_env_lock(|| {
+        env::set_var("ZEBRA_SEEDER__RATE_LIMIT__QUERIES_PER_SECOND", "50");
+        env::set_var("ZEBRA_SEEDER__RATE_LIMIT__BURST_SIZE", "100");
+
+        let config = SeederConfig::load_with_env(None).expect("should load");
+
+        assert!(config.rate_limit.is_some());
+        let rl = config.rate_limit.unwrap();
+        assert_eq!(rl.queries_per_second, 50);
+        assert_eq!(rl.burst_size, 100);
+
+        // Clean up
+        env::remove_var("ZEBRA_SEEDER__RATE_LIMIT__QUERIES_PER_SECOND");
+        env::remove_var("ZEBRA_SEEDER__RATE_LIMIT__BURST_SIZE");
+    });
+}
