@@ -1,25 +1,36 @@
-use crate::config::SeederConfig;
-use color_eyre::eyre::{Context, Result};
-use hickory_proto::op::{Header, ResponseCode};
-use hickory_proto::rr::{RData, Record, RecordType};
-use hickory_server::authority::MessageResponseBuilder;
-use hickory_server::server::{RequestHandler, ResponseHandler, ResponseInfo};
-use hickory_server::ServerFuture;
-use rand::rng;
-use rand::seq::SliceRandom;
-use std::net::IpAddr;
-use std::num::NonZeroU32;
-use std::sync::Arc;
-use tokio::net::{TcpListener, UdpSocket};
-use tokio::time;
+use std::{
+    net::IpAddr,
+    num::NonZeroU32,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
+use color_eyre::eyre::{Context, Result};
 use dashmap::DashMap;
-use governor::state::InMemoryState;
-use governor::{Quota, RateLimiter as GovernorLimiter};
+use governor::{state::InMemoryState, Quota, RateLimiter as GovernorLimiter};
+use hickory_proto::{
+    op::{Header, ResponseCode},
+    rr::{RData, Record, RecordType},
+};
+use hickory_server::{
+    authority::MessageResponseBuilder,
+    server::{RequestHandler, ResponseHandler, ResponseInfo},
+    ServerFuture,
+};
 use metrics::{counter, gauge, histogram};
+use rand::{rng, seq::SliceRandom};
+use tokio::{
+    net::{TcpListener, UdpSocket},
+    sync::watch,
+};
 use tracing::{info_span, Instrument};
+use zebra_chain::block::Height;
+use zebra_network::PeerSocketAddr;
+
+use crate::config::SeederConfig;
 
 /// Per-IP rate limiter for DNS queries
+#[derive(Debug, Clone)]
 struct RateLimiter {
     limiters: DashMap<
         IpAddr,
@@ -33,6 +44,12 @@ struct RateLimiter {
         >,
     >,
     quota: Quota,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+struct AddressRecords {
+    ipv4: Vec<PeerSocketAddr>,
+    ipv6: Vec<PeerSocketAddr>,
 }
 
 impl RateLimiter {
@@ -70,27 +87,28 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     // Provide a user agent
     let user_agent = "zebra-seeder/0.1.0".to_string();
 
-    // Initialize zebra-network
-    let (peer_set, address_book, _peer_sender) = zebra_network::init(
+    let (chain_tip, chain_tip_sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
+
+    // TODO: Use the height and block time of the last checkpointed block to estimate the network chain tip height here based on the current time from the system clock.
+
+    // Use the latest network upgrade for the configured network with a defined activation height
+    chain_tip_sender.send_best_tip_height(Height::MAX);
+
+    // Initialize zebra-network. It's okay to drop:
+    // - The unused peer set, it'll be polled regularly by the candidate set.
+    // - The unused misbehaviour sender, it'll cause an untracked and otherwise-unused task to harmlessly exit early.
+    let (_, address_book, _) = zebra_network::init(
         config.network.clone(),
         inbound_service,
-        zebra_chain::chain_tip::NoChainTip,
+        chain_tip,
         user_agent,
     )
     .await;
 
-    // Spawn the Crawl Coordinator
-    let crawl_interval = config.crawl_interval;
     let address_book_monitor = address_book.clone();
     let default_port = config.network.network.default_port();
-
-    let crawler_handle = tokio::spawn(async move {
-        // Keep peer_set alive in the crawler task to ensure the network stack keeps running
-        let _keep_alive = peer_set;
-
-        // Wait specifically for the first crawl to (hopefully) finish or at least start before logging
-        // But for now, standard interval tick is fine.
-        let mut interval = time::interval(crawl_interval);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(config.metrics_log_interval);
 
         loop {
             interval.tick().await;
@@ -126,9 +144,11 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
     tracing::info!("Initializing DNS server on {}", config.dns_listen_addr);
 
+    let latest_addresses =
+        spawn_addresses_cache_updater(address_book.clone(), config.network.network.default_port());
+
     let authority = SeederAuthority::new(
-        address_book,
-        config.network.network,
+        latest_addresses,
         config.seed_domain.clone(),
         config.dns_ttl,
         rate_limiter,
@@ -157,17 +177,11 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
             result.wrap_err("DNS server crashed")?;
             tracing::info!("DNS server stopped, shutting down...");
 
-            // Clean up crawler task
-            crawler_handle.abort();
-
             // Brief delay to allow cleanup
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received shutdown signal, cleaning up...");
-
-            // Abort the crawler task
-            crawler_handle.abort();
 
             // Note: ServerFuture doesn't have a graceful shutdown method,
             // so we rely on the Drop implementation to clean up sockets
@@ -183,6 +197,88 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn spawn_addresses_cache_updater(
+    address_book: Arc<Mutex<zebra_network::AddressBook>>,
+    default_port: u16,
+) -> watch::Receiver<AddressRecords> {
+    let (latest_addresses_sender, latest_addresses) = watch::channel(AddressRecords::default());
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            let matched_peers: Vec<_> = match address_book.lock() {
+                Ok(guard) => guard
+                    .peers()
+                    .filter(|meta| {
+                        let ip = meta.addr().ip();
+
+                        // 1. Routability check
+                        let is_global =
+                            !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+
+                        // 2. Port check
+                        let is_default_port = meta.addr().port() == default_port;
+
+                        is_global && is_default_port
+                    })
+                    .collect::<Vec<_>>(),
+                Err(_poisoned) => {
+                    tracing::error!(
+                        "Address book mutex poisoned during DNS query handling, recovering"
+                    );
+                    counter!("seeder.mutex_poisoning_total", "location" => "dns_handler")
+                        .increment(1);
+
+                    panic!(
+                        "poisoned address book mutex in latest address records cache updater task"
+                    );
+                }
+            };
+
+            // Get verified peers (using reconnection_peers or similar if verified() is strictly "verified by zebra-network connection")
+            // `reconnection_peers()` returns MetaAddrs that are good for connection.
+            // However, the prompt says "select a random subset".
+
+            // Note: using `reconnection_peers()` is better than `peers()` as it sorts/filters by reliability.
+            // But let's check what's available. `AddressBook` has `peers()` iterator usually.
+            // Assuming `reconnection_peers()` gives us a nice list.
+            // Actually `reconnection_peers` returns a Box<dyn Iterator>.
+            // Use `peers()` or look at docs if available.
+            // Since I can't see docs, I'll use `reconnection_peers` if it compiles, else `peers().values()`.
+            // Let's assume we want ALL peers and filter them ourselves as per requirements.
+
+            // Filter and collect up to 50 eligible peers (more than we need for shuffle randomness)
+            // This avoids allocating a vector for ALL peers in the address book
+
+            // 3. Address family check
+            let mut ipv4: Vec<_> = matched_peers
+                .iter()
+                .filter(|meta| meta.addr().ip().is_ipv4())
+                .take(PEER_SELECTION_POOL_SIZE)
+                .collect();
+            let mut ipv6: Vec<_> = matched_peers
+                .iter()
+                .filter(|meta| meta.addr().ip().is_ipv6())
+                .take(PEER_SELECTION_POOL_SIZE)
+                .collect();
+
+            // Shuffle and take the configured maximum
+            ipv4.shuffle(&mut rng());
+            ipv4.truncate(MAX_DNS_RESPONSE_PEERS);
+            ipv6.shuffle(&mut rng());
+            ipv6.truncate(MAX_DNS_RESPONSE_PEERS);
+
+            let ipv4 = ipv4.iter().map(|peer| peer.addr()).collect::<Vec<_>>();
+            let ipv6 = ipv6.iter().map(|peer| peer.addr()).collect::<Vec<_>>();
+
+            let _ = latest_addresses_sender.send(AddressRecords { ipv4, ipv6 });
+        }
+    });
+
+    latest_addresses
 }
 
 fn log_crawler_status(book: &zebra_network::AddressBook, default_port: u16) {
@@ -223,8 +319,7 @@ fn log_crawler_status(book: &zebra_network::AddressBook, default_port: u16) {
 
 #[derive(Clone)]
 pub struct SeederAuthority {
-    address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
-    network: zebra_chain::parameters::Network,
+    latest_addresses: watch::Receiver<AddressRecords>,
     seed_domain: String,
     dns_ttl: u32,
     rate_limiter: Option<Arc<RateLimiter>>,
@@ -236,15 +331,13 @@ const PEER_SELECTION_POOL_SIZE: usize = 50; // Collect 2x peers for shuffle rand
 
 impl SeederAuthority {
     fn new(
-        address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
-        network: zebra_chain::parameters::Network,
+        latest_addresses: watch::Receiver<AddressRecords>,
         seed_domain: String,
         dns_ttl: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Self {
         Self {
-            address_book,
-            network,
+            latest_addresses,
             seed_domain,
             dns_ttl,
             rate_limiter,
@@ -314,72 +407,10 @@ impl SeederAuthority {
             let mut records = Vec::new();
 
             // Collect peer data while holding the lock, then drop the guard
-            let matched_peers = {
-                let book = match self.address_book.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        tracing::error!(
-                            "Address book mutex poisoned during DNS query handling, recovering"
-                        );
-                        counter!("seeder.mutex_poisoning_total", "location" => "dns_handler")
-                            .increment(1);
-                        poisoned.into_inner()
-                    }
-                };
-
-                // Get verified peers (using reconnection_peers or similar if verified() is strictly "verified by zebra-network connection")
-                // `reconnection_peers()` returns MetaAddrs that are good for connection.
-                // However, the prompt says "select a random subset".
-
-                // Note: using `reconnection_peers()` is better than `peers()` as it sorts/filters by reliability.
-                // But let's check what's available. `AddressBook` has `peers()` iterator usually.
-                // Assuming `reconnection_peers()` gives us a nice list.
-                // Actually `reconnection_peers` returns a Box<dyn Iterator>.
-                // Use `peers()` or look at docs if available.
-                // Since I can't see docs, I'll use `reconnection_peers` if it compiles, else `peers().values()`.
-                // Let's assume we want ALL peers and filter them ourselves as per requirements.
-
-                let default_port = self.network.default_port();
-
-                // Filter and collect up to 50 eligible peers (more than we need for shuffle randomness)
-                // This avoids allocating a vector for ALL peers in the address book
-                let mut matched_peers: Vec<_> = book
-                    .peers()
-                    .filter(|meta| {
-                        let ip = meta.addr().ip();
-
-                        // 1. Routability check
-                        let is_global =
-                            !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
-                        if !is_global {
-                            return false;
-                        }
-
-                        // 2. Port check
-                        if meta.addr().port() != default_port {
-                            return false;
-                        }
-
-                        // 3. Address family check
-                        match record_type {
-                            RecordType::A => ip.is_ipv4(),
-                            RecordType::AAAA => ip.is_ipv6(),
-                            _ => false,
-                        }
-                    })
-                    .take(PEER_SELECTION_POOL_SIZE)
-                    .collect::<Vec<_>>();
-
-                // Shuffle and take the configured maximum
-                matched_peers.shuffle(&mut rng());
-                matched_peers.truncate(MAX_DNS_RESPONSE_PEERS);
-
-                // Copy the socket addresses so we can drop the lock
-                matched_peers
-                    .iter()
-                    .map(|peer| peer.addr())
-                    .collect::<Vec<_>>()
-                // MutexGuard is dropped here
+            let matched_peers = match record_type {
+                RecordType::A => self.latest_addresses.borrow().ipv4.clone(),
+                RecordType::AAAA => self.latest_addresses.borrow().ipv6.clone(),
+                _ => Vec::new(),
             };
 
             histogram!("seeder.dns.response_peers").record(matched_peers.len() as f64);

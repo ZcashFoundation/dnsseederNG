@@ -29,7 +29,7 @@ pub struct SeederConfig {
 
     /// Duration between refreshing the address book.
     #[serde(with = "humantime_serde")]
-    pub crawl_interval: Duration,
+    pub metrics_log_interval: Duration,
 
     /// Prometheus metrics configuration.
     ///
@@ -88,12 +88,12 @@ impl Default for SeederConfig {
     fn default() -> Self {
         Self {
             network: zebra_network::Config::default(),
-            dns_listen_addr: "0.0.0.0:53"
+            dns_listen_addr: "0.0.0.0:3000"
                 .parse()
                 .expect("hardcoded address must be valid"),
             seed_domain: "mainnet.seeder.example.com".to_string(),
-            dns_ttl: 600,                             // 10 minutes
-            crawl_interval: Duration::from_secs(600), // 10 minutes
+            dns_ttl: 600,                                   // 10 minutes
+            metrics_log_interval: Duration::from_secs(600), // 10 minutes
             metrics: None,
             rate_limit: Some(RateLimitConfig::default()),
         }
