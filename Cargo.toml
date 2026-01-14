@@ -13,7 +13,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 color-eyre = "0.6"
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.5", features = ["util"] }
 # Zebra dependencies - assuming latest published versions or git if needed.
 # For scaffolding, we use version wildcards or recent versions to ensure compilation starts.
 zebra-network = "2.0.2"
