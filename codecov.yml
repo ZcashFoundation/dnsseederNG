@@ -1,0 +1,19 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 60%         # Target coverage for the project
+        threshold: 2%       # Allow 2% decrease
+    patch:
+      default:
+        target: 70%         # New code should be well-tested
+        threshold: 5%
+
+ignore:
+  - "src/tests/**"          # Don't count test code in coverage
+  - "build.rs"              # Build script
+  
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
