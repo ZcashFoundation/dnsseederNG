@@ -1,10 +1,12 @@
-use vergen::EmitBuilder;
+use vergen_gitcl::{BuildBuilder, Emitter, GitclBuilder};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[rustfmt::skip]
-    EmitBuilder::builder()
-        .all_build()
-        .all_git()
-        .emit()?; // Emit build instructions
+    let build = BuildBuilder::all_build()?;
+    let gitcl = GitclBuilder::all_git()?;
+    
+    Emitter::default()
+        .add_instructions(&build)?
+        .add_instructions(&gitcl)?
+        .emit()?;
     Ok(())
 }
