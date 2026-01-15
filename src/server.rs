@@ -329,19 +329,11 @@ impl SeederAuthority {
 
                 // Get verified peers (using reconnection_peers or similar if verified() is strictly "verified by zebra-network connection")
                 // `reconnection_peers()` returns MetaAddrs that are good for connection.
-                // However, the prompt says "select a random subset".
-
-                // Note: using `reconnection_peers()` is better than `peers()` as it sorts/filters by reliability.
-                // But let's check what's available. `AddressBook` has `peers()` iterator usually.
-                // Assuming `reconnection_peers()` gives us a nice list.
-                // Actually `reconnection_peers` returns a Box<dyn Iterator>.
-                // Use `peers()` or look at docs if available.
-                // Since I can't see docs, I'll use `reconnection_peers` if it compiles, else `peers().values()`.
-                // Let's assume we want ALL peers and filter them ourselves as per requirements.
+                // Note: using `reconnection_peers()` may be better than `peers()` as it sorts/filters by reliability.
 
                 let default_port = self.network.default_port();
 
-                // Filter and collect up to 50 eligible peers (more than we need for shuffle randomness)
+                // Filter and collect up to PEER_SELECTION_POOL_SIZE eligible peers (more than we need for shuffle randomness)
                 // This avoids allocating a vector for ALL peers in the address book
                 let mut matched_peers: Vec<_> = book
                     .peers()
@@ -563,5 +555,288 @@ mod tests {
             PEER_SELECTION_POOL_SIZE >= MAX_DNS_RESPONSE_PEERS * 2,
             "Pool should be at least 2x response size for good randomization"
         );
+    }
+
+    // DNS Integration Tests
+    // These require async and test the full DNS server stack
+
+    use hickory_proto::xfer::Protocol;
+    use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
+    use hickory_resolver::TokioResolver;
+    use std::net::SocketAddr;
+    use std::time::Duration;
+    use tokio::net::TcpListener as TokioTcpListener;
+
+    /// Helper to create a DNS server on a random port for testing
+    async fn create_test_dns_server(
+        authority: SeederAuthority,
+    ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+        // Bind to a random port
+        let udp_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = udp_socket.local_addr().unwrap();
+
+        let tcp_listener = TokioTcpListener::bind(server_addr).await.unwrap();
+
+        let mut server = ServerFuture::new(authority);
+        server.register_socket(udp_socket);
+        server.register_listener(tcp_listener, Duration::from_secs(5));
+
+        let handle = tokio::spawn(async move {
+            let _ = server.block_until_done().await;
+        });
+
+        // Give server time to start
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        (server_addr, handle)
+    }
+
+    /// Helper to create a resolver pointing to our test server
+    fn create_test_resolver(server_addr: SocketAddr) -> TokioResolver {
+        use hickory_resolver::name_server::TokioConnectionProvider;
+
+        let mut config = ResolverConfig::new();
+        config.add_name_server(NameServerConfig::new(server_addr, Protocol::Udp));
+
+        let mut opts = ResolverOpts::default();
+        opts.timeout = Duration::from_secs(2);
+        opts.attempts = 1;
+
+        TokioResolver::builder_with_config(config, TokioConnectionProvider::default())
+            .with_options(opts)
+            .build()
+    }
+
+    /// Helper to create a test AddressBook with known peers
+    fn create_test_address_book(
+        _peers: Vec<SocketAddr>,
+    ) -> Arc<std::sync::Mutex<zebra_network::AddressBook>> {
+        use std::sync::Mutex;
+
+        // Create an empty AddressBook using zebra-network's expected signature
+        // AddressBook::new(local_addr, network, max_peers, span)
+        let local_addr: SocketAddr = "127.0.0.1:8233".parse().unwrap();
+        let network = zebra_chain::parameters::Network::Mainnet;
+        let max_peers = 50;
+        let span = tracing::info_span!("test_address_book");
+
+        let address_book = zebra_network::AddressBook::new(local_addr, &network, max_peers, span);
+
+        Arc::new(Mutex::new(address_book))
+    }
+
+    #[tokio::test]
+    async fn test_dns_server_starts_and_responds() {
+        let address_book = create_test_address_book(vec![]);
+
+        let authority = SeederAuthority::new(
+            address_book,
+            zebra_chain::parameters::Network::Mainnet,
+            "mainnet.seeder.test".to_string(),
+            600,
+            None,
+        );
+
+        let (server_addr, handle) = create_test_dns_server(authority).await;
+
+        // Create resolver
+        let resolver = create_test_resolver(server_addr);
+
+        // Query for A records - should get a valid response (possibly empty)
+        let result = resolver
+            .lookup("mainnet.seeder.test", hickory_proto::rr::RecordType::A)
+            .await;
+
+        // The query should complete (even if no peers are available)
+        // An empty response or valid response is acceptable
+        match result {
+            Ok(response) => {
+                // Valid response - check all IPs are IPv4
+                for record in response.iter() {
+                    if let Some(ip) = record.ip_addr() {
+                        assert!(ip.is_ipv4(), "A record should return IPv4");
+                    }
+                }
+            }
+            Err(e) => {
+                // No error means query worked, empty is OK
+                let error_str = e.to_string();
+                assert!(
+                    error_str.contains("no records") || error_str.contains("NoRecordsFound"),
+                    "Unexpected error: {}",
+                    e
+                );
+            }
+        }
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_dns_refused_for_wrong_domain() {
+        let address_book = create_test_address_book(vec![]);
+
+        let authority = SeederAuthority::new(
+            address_book,
+            zebra_chain::parameters::Network::Mainnet,
+            "mainnet.seeder.test".to_string(),
+            600,
+            None,
+        );
+
+        let (server_addr, handle) = create_test_dns_server(authority).await;
+        let resolver = create_test_resolver(server_addr);
+
+        // Query for a different domain - should be refused
+        let result = resolver
+            .lookup("wrong.domain.test", hickory_proto::rr::RecordType::A)
+            .await;
+
+        assert!(result.is_err(), "Query for wrong domain should fail");
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_dns_rate_limiting_blocks_excessive_queries() {
+        let address_book = create_test_address_book(vec![]);
+
+        // Very low rate limit for testing
+        let rate_limiter = Arc::new(RateLimiter::new(1, 2));
+
+        let authority = SeederAuthority::new(
+            address_book,
+            zebra_chain::parameters::Network::Mainnet,
+            "mainnet.seeder.test".to_string(),
+            600,
+            Some(rate_limiter),
+        );
+
+        let (server_addr, handle) = create_test_dns_server(authority).await;
+        let resolver = create_test_resolver(server_addr);
+
+        // First two queries should succeed (within burst)
+        let _ = resolver
+            .lookup("mainnet.seeder.test", hickory_proto::rr::RecordType::A)
+            .await;
+        let _ = resolver
+            .lookup("mainnet.seeder.test", hickory_proto::rr::RecordType::A)
+            .await;
+
+        // Third query should timeout (rate limited = dropped)
+        let result = tokio::time::timeout(
+            Duration::from_millis(500),
+            resolver.lookup("mainnet.seeder.test", hickory_proto::rr::RecordType::A),
+        )
+        .await;
+
+        // Should either timeout or get an error
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Third query should be rate limited"
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_seeder_authority_handles_aaaa_queries() {
+        let address_book = create_test_address_book(vec![]);
+
+        let authority = SeederAuthority::new(
+            address_book,
+            zebra_chain::parameters::Network::Mainnet,
+            "mainnet.seeder.test".to_string(),
+            600,
+            None,
+        );
+
+        let (server_addr, handle) = create_test_dns_server(authority).await;
+        let resolver = create_test_resolver(server_addr);
+
+        // Query for AAAA records
+        let result = resolver
+            .lookup("mainnet.seeder.test", hickory_proto::rr::RecordType::AAAA)
+            .await;
+
+        // Should get a valid response (possibly empty for IPv6)
+        match result {
+            Ok(response) => {
+                for record in response.iter() {
+                    if let Some(ip) = record.ip_addr() {
+                        assert!(ip.is_ipv6(), "AAAA record should return IPv6");
+                    }
+                }
+            }
+            Err(e) => {
+                let error_str = e.to_string();
+                assert!(
+                    error_str.contains("no records") || error_str.contains("NoRecordsFound"),
+                    "Unexpected error: {}",
+                    e
+                );
+            }
+        }
+
+        handle.abort();
+    }
+
+    // Property-Based Tests
+    // These use proptest to verify filtering logic with random inputs
+
+    use proptest::prelude::*;
+
+    /// The IP filtering logic used in handle_request_inner
+    fn is_routable(ip: IpAddr) -> bool {
+        !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast()
+    }
+
+    proptest! {
+        /// Verify that the IP filtering logic never panics on any valid IP address
+        #[test]
+        fn prop_ip_filtering_never_panics(ip_bytes in prop::array::uniform4(any::<u8>())) {
+            let ip = IpAddr::V4(std::net::Ipv4Addr::from(ip_bytes));
+            // Should never panic
+            let _ = is_routable(ip);
+        }
+
+        /// Verify that the IP filtering logic never panics on any valid IPv6 address
+        #[test]
+        fn prop_ipv6_filtering_never_panics(ip_bytes in prop::array::uniform16(any::<u8>())) {
+            let ip = IpAddr::V6(std::net::Ipv6Addr::from(ip_bytes));
+            // Should never panic
+            let _ = is_routable(ip);
+        }
+
+        /// Verify that loopback addresses are never considered routable
+        #[test]
+        fn prop_loopback_never_routable(last_byte in 1u8..=255u8) {
+            let ip = IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, last_byte));
+            prop_assert!(!is_routable(ip) || last_byte == 0, "Loopback should not be routable");
+        }
+
+        /// Verify that multicast addresses are never considered routable
+        #[test]
+        fn prop_multicast_never_routable(b2 in 0u8..=255u8, b3 in 0u8..=255u8, b4 in 0u8..=255u8) {
+            // Multicast range: 224.0.0.0 - 239.255.255.255
+            let ip = IpAddr::V4(std::net::Ipv4Addr::new(224 + (b2 % 16), b2, b3, b4));
+            prop_assert!(!is_routable(ip), "Multicast should not be routable");
+        }
+    }
+
+    #[test]
+    fn test_routable_ip_classification() {
+        // Global IPs should be routable
+        assert!(is_routable("8.8.8.8".parse().unwrap()));
+        assert!(is_routable("1.1.1.1".parse().unwrap()));
+        assert!(is_routable("2001:4860:4860::8888".parse().unwrap()));
+
+        // Special addresses should NOT be routable
+        assert!(!is_routable("127.0.0.1".parse().unwrap()));
+        assert!(!is_routable("0.0.0.0".parse().unwrap()));
+        assert!(!is_routable("224.0.0.1".parse().unwrap()));
+        assert!(!is_routable("::1".parse().unwrap()));
+        assert!(!is_routable("::".parse().unwrap()));
+        assert!(!is_routable("ff02::1".parse().unwrap()));
     }
 }

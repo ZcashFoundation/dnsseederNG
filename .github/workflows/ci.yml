@@ -20,6 +20,9 @@ jobs:
     - name: Setup Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
       
+    - name: Install cargo-nextest
+      run: cargo install cargo-nextest --locked
+      
     - name: Format Check
       run: cargo fmt --all -- --check
       
@@ -27,7 +30,7 @@ jobs:
       run: cargo clippy -- -D warnings
 
     - name: Run Tests
-      run: cargo test --verbose
+      run: cargo nextest run --verbose
 
     - name: Build
       run: cargo build --verbose
@@ -41,6 +44,9 @@ jobs:
     
     - name: Setup Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
+      
+    - name: Install cargo-nextest
+      run: cargo install cargo-nextest --locked
     
     - name: Install cargo-tarpaulin
       run: cargo install cargo-tarpaulin
