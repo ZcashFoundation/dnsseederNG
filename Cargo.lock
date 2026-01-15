@@ -5213,11 +5213,13 @@ name = "zebra-seeder"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "clap",
  "color-eyre",
  "config",
  "dashmap",
  "dotenvy",
+ "futures",
  "governor",
  "hickory-dns",
  "hickory-proto",

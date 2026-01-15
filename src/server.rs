@@ -27,7 +27,7 @@ use tracing::{info_span, Instrument};
 use zebra_chain::block::Height;
 use zebra_network::PeerSocketAddr;
 
-use crate::config::SeederConfig;
+use crate::{config::SeederConfig, mock_chain_tip::MockChainTip};
 
 /// Per-IP rate limiter for DNS queries
 #[derive(Debug, Clone)]
@@ -100,7 +100,7 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     // Provide a user agent
     let user_agent = "zebra-seeder/0.1.0".to_string();
 
-    let (chain_tip, chain_tip_sender) = zebra_chain::chain_tip::mock::MockChainTip::new();
+    let (chain_tip, chain_tip_sender) = MockChainTip::new();
 
     // TODO: Use the height and block time of the last checkpointed block to estimate the network chain tip height here based on the current time from the system clock.
 
