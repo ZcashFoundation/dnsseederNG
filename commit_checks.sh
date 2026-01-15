@@ -9,10 +9,10 @@ cargo fmt --all -- --check
 echo "Running clippy check..."
 cargo clippy -- -D warnings
 
-echo "Running tests with nextest..."
-cargo nextest run 
-
 echo "Building..."
 cargo build --verbose
+
+echo "Running tests with nextest..."
+cargo nextest run 
 
 echo "All checks passed! 🎉"

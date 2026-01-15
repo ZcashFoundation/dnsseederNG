@@ -68,7 +68,14 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     });
 
     // Provide a user agent
-    let user_agent = "zebra-seeder/0.1.0".to_string();
+    let user_agent = if let Some(sha) = option_env!("VERGEN_GIT_SHA") {
+        let short_sha = &sha[..7.min(sha.len())];
+        format!("zebra-seeder/{} ({})", env!("CARGO_PKG_VERSION"), short_sha)
+    } else {
+        format!("zebra-seeder/{}", env!("CARGO_PKG_VERSION"))
+    };
+
+    tracing::info!("User-Agent: {}", user_agent);
 
     // Initialize zebra-network
     let (peer_set, address_book, _peer_sender) = zebra_network::init(
