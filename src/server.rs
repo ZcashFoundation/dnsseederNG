@@ -468,6 +468,131 @@ impl SeederAuthority {
 
 #[cfg(test)]
 mod tests {
-    // Note: filter_candidates tests removed as filtering logic is now inlined
-    // in handle_request_inner for better performance (see peer collection optimization)
+    use super::*;
+
+    // Rate Limiter Tests
+    #[test]
+    fn test_rate_limiter_allows_normal_queries() {
+        let limiter = RateLimiter::new(10, 20);
+        let test_ip: IpAddr = "192.168.1.1".parse().unwrap();
+
+        // First query should be allowed
+        assert!(limiter.check(test_ip), "First query should be allowed");
+
+        // Second query should also be allowed (within burst)
+        assert!(limiter.check(test_ip), "Second query should be allowed");
+    }
+
+    #[test]
+    fn test_rate_limiter_blocks_excessive_queries() {
+        let limiter = RateLimiter::new(1, 2); // Very low limits for testing
+        let test_ip: IpAddr = "192.168.1.2".parse().unwrap();
+
+        // First two queries should pass (burst size = 2)
+        assert!(limiter.check(test_ip), "Query 1 should pass");
+        assert!(limiter.check(test_ip), "Query 2 should pass");
+
+        // Third query should be rate limited
+        assert!(!limiter.check(test_ip), "Query 3 should be rate limited");
+    }
+
+    #[test]
+    fn test_rate_limiter_per_ip_isolation() {
+        let limiter = RateLimiter::new(1, 1);
+        let ip1: IpAddr = "192.168.1.1".parse().unwrap();
+        let ip2: IpAddr = "192.168.1.2".parse().unwrap();
+
+        // Exhaust IP1's quota
+        assert!(limiter.check(ip1), "IP1 first query should pass");
+        assert!(!limiter.check(ip1), "IP1 second query should be blocked");
+
+        // IP2 should still have quota
+        assert!(limiter.check(ip2), "IP2 should have independent quota");
+    }
+
+    #[test]
+    fn test_rate_limiter_ipv6_support() {
+        let limiter = RateLimiter::new(10, 20);
+        let ipv6: IpAddr = "2001:db8::1".parse().unwrap();
+
+        assert!(limiter.check(ipv6), "IPv6 addresses should be supported");
+    }
+
+    // Peer Filtering Logic Tests
+    #[test]
+    fn test_ipv4_is_global() {
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        let unspecified: IpAddr = "0.0.0.0".parse().unwrap();
+        let multicast: IpAddr = "224.0.0.1".parse().unwrap();
+        let global: IpAddr = "8.8.8.8".parse().unwrap();
+
+        // Test the same logic used in handle_request_inner for filtering
+        assert!(loopback.is_loopback(), "Loopback should be detected");
+        assert!(
+            unspecified.is_unspecified(),
+            "Unspecified should be detected"
+        );
+        assert!(multicast.is_multicast(), "Multicast should be detected");
+
+        let is_global = !global.is_loopback() && !global.is_unspecified() && !global.is_multicast();
+        assert!(is_global, "8.8.8.8 should be considered global");
+    }
+
+    #[test]
+    fn test_ipv6_is_global() {
+        let loopback: IpAddr = "::1".parse().unwrap();
+        let unspecified: IpAddr = "::".parse().unwrap();
+        let multicast: IpAddr = "ff02::1".parse().unwrap();
+        let global: IpAddr = "2001:4860:4860::8888".parse().unwrap();
+
+        assert!(loopback.is_loopback());
+        assert!(unspecified.is_unspecified());
+        assert!(multicast.is_multicast());
+
+        let is_global = !global.is_loopback() && !global.is_unspecified() && !global.is_multicast();
+        assert!(is_global, "Google DNS IPv6 should be considered global");
+    }
+
+    #[test]
+    fn test_private_ipv4_ranges() {
+        let private_10: IpAddr = "10.0.0.1".parse().unwrap();
+        let private_172: IpAddr = "172.16.0.1".parse().unwrap();
+        let private_192: IpAddr = "192.168.1.1".parse().unwrap();
+
+        // These are not loopback/unspecified/multicast, but they're private
+        // The server.rs logic doesn't explicitly filter private ranges,
+        // but we document this behavior for future reference
+        let is_global_10 =
+            !private_10.is_loopback() && !private_10.is_unspecified() && !private_10.is_multicast();
+        let is_global_172 = !private_172.is_loopback()
+            && !private_172.is_unspecified()
+            && !private_172.is_multicast();
+        let is_global_192 = !private_192.is_loopback()
+            && !private_192.is_unspecified()
+            && !private_192.is_multicast();
+
+        // Note: Current implementation would consider these "global"
+        // This is acceptable for a seeder as peers on private networks won't be reachable anyway
+        assert!(is_global_10);
+        assert!(is_global_172);
+        assert!(is_global_192);
+    }
+
+    // DNS Response Constants Tests
+    #[test]
+    fn test_dns_response_constants() {
+        // Verify the constants are reasonable
+        assert_eq!(
+            MAX_DNS_RESPONSE_PEERS, 25,
+            "Should return max 25 peers per query"
+        );
+        assert_eq!(
+            PEER_SELECTION_POOL_SIZE, 50,
+            "Should collect 50 peers for randomization"
+        );
+        assert!(
+            PEER_SELECTION_POOL_SIZE >= MAX_DNS_RESPONSE_PEERS * 2,
+            "Pool should be at least 2x response size for good randomization"
+        );
+    }
 }

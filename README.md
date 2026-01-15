@@ -1,5 +1,8 @@
 # dnsseederNG
 
+[![Rust CI](https://github.com/alchemydc/dnsseederNG/actions/workflows/ci.yml/badge.svg)](https://github.com/alchemydc/dnsseederNG/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/alchemydc/dnsseederNG/branch/dev/graph/badge.svg)](https://codecov.io/gh/alchemydc/dnsseederNG)
+
 A Rust-based DNS seeder for the Zcash network, mirroring patterns from the [Zebra](https://github.com/zcashfoundation/zebra) project.
 
 ## Status

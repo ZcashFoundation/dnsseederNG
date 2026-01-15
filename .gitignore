@@ -2,3 +2,4 @@
 .env
 cache/
 utils/
+docs/private/
