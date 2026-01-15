@@ -141,7 +141,7 @@ sequenceDiagram
 
 **Implementation:**
 - `governor` crate with token bucket algorithm
-- `DashMap` for lock-free concurrent IP tracking
+- `DashMap` for concurrent IP tracking
 - Each IP gets isolated rate limiter instance
 
 **Configuration:**
@@ -288,13 +288,13 @@ Implement per-IP rate limiting using `governor` crate:
 **Rationale:**
 - **Security**: Prevents amplification attacks
 - **Fairness**: No single IP can monopolize resources
-- **Performance**: <1ms overhead with lock-free DashMap
+- **Performance**: <1ms overhead with DashMap
 - **Configurability**: Operators can tune based on traffic
 - **Silent drops**: Avoid amplification (no error responses)
 
 **Implementation:**
 - `governor` crate for token bucket algorithm (GCRA)
-- `DashMap` for lock-free per-IP tracking
+- `DashMap` for per-IP tracking across threads in a single map
 - Each IP gets isolated rate limiter instance
 - Metrics track rate-limited requests
 
@@ -314,7 +314,7 @@ Implement per-IP rate limiting using `governor` crate:
 
 1. **Security First**: Rate limiting and domain validation prevent abuse
 2. **Availability**: Mutex poisoning recovery ensures continued operation
-3. **Performance**: Lock-free structures, early limiting, minimal allocations
+3. **Performance**: Concurrent data structures, early limiting, minimal allocations
 4. **Observability**: Comprehensive metrics for monitoring
 5. **Simplicity**: Leverage proven libraries (zebra-network, hickory-dns)
 6. **Configurability**: All key parameters are configurable

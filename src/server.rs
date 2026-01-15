@@ -1,25 +1,29 @@
-use crate::config::SeederConfig;
+use std::net::IpAddr;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+use std::time::Duration;
+
 use color_eyre::eyre::{Context, Result};
+use dashmap::DashMap;
+use governor::{state::InMemoryState, Quota, RateLimiter as GovernorLimiter};
 use hickory_proto::op::{Header, ResponseCode};
 use hickory_proto::rr::{RData, Record, RecordType};
 use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::server::{RequestHandler, ResponseHandler, ResponseInfo};
 use hickory_server::ServerFuture;
+use metrics::{counter, gauge, histogram};
 use rand::rng;
 use rand::seq::SliceRandom;
-use std::net::IpAddr;
-use std::num::NonZeroU32;
-use std::sync::Arc;
 use tokio::net::{TcpListener, UdpSocket};
+use tokio::sync::watch;
 use tokio::time;
-
-use dashmap::DashMap;
-use governor::state::InMemoryState;
-use governor::{Quota, RateLimiter as GovernorLimiter};
-use metrics::{counter, gauge, histogram};
 use tracing::{info_span, Instrument};
+use zebra_network::PeerSocketAddr;
+
+use crate::config::SeederConfig;
 
 /// Per-IP rate limiter for DNS queries
+#[derive(Debug, Clone)]
 struct RateLimiter {
     limiters: DashMap<
         IpAddr,
@@ -33,6 +37,14 @@ struct RateLimiter {
         >,
     >,
     quota: Quota,
+}
+
+/// Cached address records for lock-free DNS response generation.
+/// Updated periodically by a background task to avoid lock contention.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+struct AddressRecords {
+    ipv4: Vec<PeerSocketAddr>,
+    ipv6: Vec<PeerSocketAddr>,
 }
 
 impl RateLimiter {
@@ -133,9 +145,12 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
     tracing::info!("Initializing DNS server on {}", config.dns_listen_addr);
 
+    // Spawn address cache updater - provides lock-free reads for DNS queries
+    let latest_addresses =
+        spawn_addresses_cache_updater(address_book.clone(), config.network.network.default_port());
+
     let authority = SeederAuthority::new(
-        address_book,
-        config.network.network,
+        latest_addresses,
         config.seed_domain.clone(),
         config.dns_ttl,
         rate_limiter,
@@ -228,10 +243,84 @@ fn log_crawler_status(book: &zebra_network::AddressBook, default_port: u16) {
     gauge!("seeder.peers.eligible", "addr_family" => "v6").set(eligible_v6 as f64);
 }
 
+/// Spawns a background task that periodically updates the cached address records.
+/// This eliminates lock contention during DNS query handling by providing a
+/// lock-free read path via the watch channel.
+fn spawn_addresses_cache_updater(
+    address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
+    default_port: u16,
+) -> watch::Receiver<AddressRecords> {
+    let (latest_addresses_sender, latest_addresses) = watch::channel(AddressRecords::default());
+
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            let matched_peers: Vec<_> = match address_book.lock() {
+                Ok(guard) => guard
+                    .peers()
+                    .filter(|meta| {
+                        let ip = meta.addr().ip();
+
+                        // 1. Routability check
+                        let is_global =
+                            !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+
+                        // 2. Port check
+                        let is_default_port = meta.addr().port() == default_port;
+
+                        is_global && is_default_port
+                    })
+                    .collect::<Vec<_>>(),
+                Err(poisoned) => {
+                    tracing::error!("Address book mutex poisoned during cache update, recovering");
+                    counter!("seeder.mutex_poisoning_total", "location" => "cache_updater")
+                        .increment(1);
+                    poisoned
+                        .into_inner()
+                        .peers()
+                        .filter(|meta| {
+                            let ip = meta.addr().ip();
+                            let is_global =
+                                !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
+                            let is_default_port = meta.addr().port() == default_port;
+                            is_global && is_default_port
+                        })
+                        .collect::<Vec<_>>()
+                }
+            };
+
+            // Separate into IPv4 and IPv6 pools
+            let mut ipv4: Vec<_> = matched_peers
+                .iter()
+                .filter(|meta| meta.addr().ip().is_ipv4())
+                .take(PEER_SELECTION_POOL_SIZE)
+                .collect();
+            let mut ipv6: Vec<_> = matched_peers
+                .iter()
+                .filter(|meta| meta.addr().ip().is_ipv6())
+                .take(PEER_SELECTION_POOL_SIZE)
+                .collect();
+
+            // Shuffle and take the configured maximum
+            ipv4.shuffle(&mut rng());
+            ipv4.truncate(MAX_DNS_RESPONSE_PEERS);
+            ipv6.shuffle(&mut rng());
+            ipv6.truncate(MAX_DNS_RESPONSE_PEERS);
+
+            let ipv4 = ipv4.iter().map(|peer| peer.addr()).collect::<Vec<_>>();
+            let ipv6 = ipv6.iter().map(|peer| peer.addr()).collect::<Vec<_>>();
+
+            let _ = latest_addresses_sender.send(AddressRecords { ipv4, ipv6 });
+        }
+    });
+
+    latest_addresses
+}
+
 #[derive(Clone)]
 pub struct SeederAuthority {
-    address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
-    network: zebra_chain::parameters::Network,
+    latest_addresses: watch::Receiver<AddressRecords>,
     seed_domain: String,
     dns_ttl: u32,
     rate_limiter: Option<Arc<RateLimiter>>,
@@ -243,15 +332,13 @@ const PEER_SELECTION_POOL_SIZE: usize = 50; // Collect 2x peers for shuffle rand
 
 impl SeederAuthority {
     fn new(
-        address_book: Arc<std::sync::Mutex<zebra_network::AddressBook>>,
-        network: zebra_chain::parameters::Network,
+        latest_addresses: watch::Receiver<AddressRecords>,
         seed_domain: String,
         dns_ttl: u32,
         rate_limiter: Option<Arc<RateLimiter>>,
     ) -> Self {
         Self {
-            address_book,
-            network,
+            latest_addresses,
             seed_domain,
             dns_ttl,
             rate_limiter,
@@ -320,65 +407,12 @@ impl SeederAuthority {
 
             let mut records = Vec::new();
 
-            // Collect peer data while holding the lock, then drop the guard
-            let matched_peers = {
-                let book = match self.address_book.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        tracing::error!(
-                            "Address book mutex poisoned during DNS query handling, recovering"
-                        );
-                        counter!("seeder.mutex_poisoning_total", "location" => "dns_handler")
-                            .increment(1);
-                        poisoned.into_inner()
-                    }
-                };
-
-                // Get verified peers (using reconnection_peers or similar if verified() is strictly "verified by zebra-network connection")
-                // `reconnection_peers()` returns MetaAddrs that are good for connection.
-                // Note: using `reconnection_peers()` may be better than `peers()` as it sorts/filters by reliability.
-
-                let default_port = self.network.default_port();
-
-                // Filter and collect up to PEER_SELECTION_POOL_SIZE eligible peers (more than we need for shuffle randomness)
-                // This avoids allocating a vector for ALL peers in the address book
-                let mut matched_peers: Vec<_> = book
-                    .peers()
-                    .filter(|meta| {
-                        let ip = meta.addr().ip();
-
-                        // 1. Routability check
-                        let is_global =
-                            !ip.is_loopback() && !ip.is_unspecified() && !ip.is_multicast();
-                        if !is_global {
-                            return false;
-                        }
-
-                        // 2. Port check
-                        if meta.addr().port() != default_port {
-                            return false;
-                        }
-
-                        // 3. Address family check
-                        match record_type {
-                            RecordType::A => ip.is_ipv4(),
-                            RecordType::AAAA => ip.is_ipv6(),
-                            _ => false,
-                        }
-                    })
-                    .take(PEER_SELECTION_POOL_SIZE)
-                    .collect::<Vec<_>>();
-
-                // Shuffle and take the configured maximum
-                matched_peers.shuffle(&mut rng());
-                matched_peers.truncate(MAX_DNS_RESPONSE_PEERS);
-
-                // Copy the socket addresses so we can drop the lock
-                matched_peers
-                    .iter()
-                    .map(|peer| peer.addr())
-                    .collect::<Vec<_>>()
-                // MutexGuard is dropped here
+            // Read from the cached addresses - no mutex lock needed!
+            // The cache is updated by a background task every 5 seconds.
+            let matched_peers = match record_type {
+                RecordType::A => self.latest_addresses.borrow().ipv4.clone(),
+                RecordType::AAAA => self.latest_addresses.borrow().ipv6.clone(),
+                _ => Vec::new(),
             };
 
             histogram!("seeder.dns.response_peers").record(matched_peers.len() as f64);
@@ -614,31 +648,20 @@ mod tests {
             .build()
     }
 
-    /// Helper to create a test AddressBook with known peers
-    fn create_test_address_book(
-        _peers: Vec<SocketAddr>,
-    ) -> Arc<std::sync::Mutex<zebra_network::AddressBook>> {
-        use std::sync::Mutex;
-
-        // Create an empty AddressBook using zebra-network's expected signature
-        // AddressBook::new(local_addr, network, max_peers, span)
-        let local_addr: SocketAddr = "127.0.0.1:8233".parse().unwrap();
-        let network = zebra_chain::parameters::Network::Mainnet;
-        let max_peers = 50;
-        let span = tracing::info_span!("test_address_book");
-
-        let address_book = zebra_network::AddressBook::new(local_addr, &network, max_peers, span);
-
-        Arc::new(Mutex::new(address_book))
+    /// Helper to create a test watch receiver with empty addresses for testing
+    fn create_test_address_receiver() -> watch::Receiver<AddressRecords> {
+        let (sender, receiver) = watch::channel(AddressRecords::default());
+        // Keep sender alive by leaking it (acceptable for tests)
+        std::mem::forget(sender);
+        receiver
     }
 
     #[tokio::test]
     async fn test_dns_server_starts_and_responds() {
-        let address_book = create_test_address_book(vec![]);
+        let latest_addresses = create_test_address_receiver();
 
         let authority = SeederAuthority::new(
-            address_book,
-            zebra_chain::parameters::Network::Mainnet,
+            latest_addresses,
             "mainnet.seeder.test".to_string(),
             600,
             None,
@@ -681,11 +704,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_dns_refused_for_wrong_domain() {
-        let address_book = create_test_address_book(vec![]);
+        let latest_addresses = create_test_address_receiver();
 
         let authority = SeederAuthority::new(
-            address_book,
-            zebra_chain::parameters::Network::Mainnet,
+            latest_addresses,
             "mainnet.seeder.test".to_string(),
             600,
             None,
@@ -706,14 +728,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_dns_rate_limiting_blocks_excessive_queries() {
-        let address_book = create_test_address_book(vec![]);
+        let latest_addresses = create_test_address_receiver();
 
         // Very low rate limit for testing
         let rate_limiter = Arc::new(RateLimiter::new(1, 2));
 
         let authority = SeederAuthority::new(
-            address_book,
-            zebra_chain::parameters::Network::Mainnet,
+            latest_addresses,
             "mainnet.seeder.test".to_string(),
             600,
             Some(rate_limiter),
@@ -748,11 +769,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_seeder_authority_handles_aaaa_queries() {
-        let address_book = create_test_address_book(vec![]);
+        let latest_addresses = create_test_address_receiver();
 
         let authority = SeederAuthority::new(
-            address_book,
-            zebra_chain::parameters::Network::Mainnet,
+            latest_addresses,
             "mainnet.seeder.test".to_string(),
             600,
             None,
