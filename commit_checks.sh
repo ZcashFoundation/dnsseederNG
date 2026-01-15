@@ -1,14 +1,18 @@
 #!/bin/bash
 
-echo "running fmt check"
+# Exit immediately if a command exits with a non-zero status.
+set -e
+
+echo "Running fmt check..."
 cargo fmt --all -- --check
 
-echo "running clippy check"
+echo "Running clippy check..."
 cargo clippy -- -D warnings
 
-echo "running tests"
-cargo test --verbose
-
-echo "building"
+echo "Building..."
 cargo build --verbose
 
+echo "Running tests with nextest..."
+cargo nextest run 
+
+echo "All checks passed! 🎉"

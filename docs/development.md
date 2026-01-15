@@ -89,32 +89,91 @@ zebra-seeder/
 
 ## Testing
 
+### Prerequisites
+
+Install testing tools:
+
+```bash
+# Install cargo-nextest (faster test runner)
+cargo install cargo-nextest --locked
+
+# Install cargo-tarpaulin (coverage - Linux/CI only)
+cargo install cargo-tarpaulin
+```
+
 ### Run All Tests
 
 ```bash
+# Using nextest (recommended)
+cargo nextest run
+
+# Or with standard cargo test
 cargo test
 ```
 
 ### Run Specific Test
 
 ```bash
+cargo nextest run test_rate_limit_default
+
+# Or with cargo test
 cargo test test_rate_limit_default
 ```
 
+### Test Coverage
+
+**Note**: `cargo-tarpaulin` only works on Linux. On macOS, run coverage in CI or use Docker.
+
+```bash
+# Generate coverage report (Linux/CI only)
+cargo tarpaulin --ignore-tests --out Stdout
+
+# Generate HTML report
+cargo tarpaulin --ignore-tests --out Html --output-dir coverage
+
+# View HTML report
+open coverage/index.html
+```
+
+**Coverage in CI**: The GitHub Actions workflow automatically runs coverage on `ubuntu-latest` and uploads to Codecov.
+
 ### Test Structure
 
-- **Unit tests**: In `src/tests/*.rs`
-- **Config tests**: `config_tests.rs` (env var handling, defaults)
-- **CLI tests**: `cli_tests.rs` (argument parsing)
+- **Unit tests**: Inline in source files (e.g., `src/server.rs`)
+- **Config tests**: `src/tests/config_tests.rs` (env var handling, defaults)
+- **CLI tests**: `src/tests/cli_tests.rs` (argument parsing)
+- **DNS integration tests**: `src/server.rs` (inline async tests)
+- **Property-based tests**: `src/server.rs` (proptest for IP filtering)
 
 ### Adding Tests
 
-Add new tests to appropriate file in `src/tests/`:
+Add new tests to the appropriate module:
 
+**Unit test example:**
 ```rust
 #[test]
 fn test_new_feature() {
     // Your test here
+}
+```
+
+**Async integration test example:**
+```rust
+#[tokio::test]
+async fn test_dns_feature() {
+    // Your async test here
+}
+```
+
+**Property-based test example:**
+```rust
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn prop_never_panics(input in any::<u32>()) {
+        // Test with random inputs
+    }
 }
 ```
 
@@ -131,6 +190,41 @@ fn test_my_config() {
     });
 }
 ```
+
+## Maintenance
+
+### Dependency Management
+
+To keep dependencies up to date, use the following tools:
+
+#### Check for Updates (Allowed by Semver)
+
+To see what can be updated within your current `Cargo.toml` constraints (updating the `Cargo.lock` file):
+
+```bash
+cargo update --dry-run
+```
+
+To apply those updates:
+
+```bash
+cargo update
+```
+
+#### Check for Major/Minor Updates (Beyond Semver)
+
+To see if new major or minor versions are available that require manual `Cargo.toml` changes:
+
+```bash
+# Install cargo-outdated first
+cargo install cargo-outdated
+
+# Run the check
+cargo outdated -R -d 1
+```
+
+- `-R`: Root dependencies only (excludes transitives)
+- `-d 1`: Depth 1 (ignores deep dependency trees)
 
 ## Code Style
 
