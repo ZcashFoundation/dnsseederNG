@@ -75,7 +75,6 @@ ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
 | `dns_listen_addr` | `ZEBRA_SEEDER__DNS_LISTEN_ADDR` | `0.0.0.0:53` | DNS server listening address and port |
 | `dns_ttl` | `ZEBRA_SEEDER__DNS_TTL` | `600` | DNS response TTL in seconds. Controls how long clients cache responses. Lower values (e.g., 300) provide fresher data but increase query load. Higher values (e.g., 1800) reduce load but slower updates. |
 | `seed_domain` | `ZEBRA_SEEDER__SEED_DOMAIN` | `mainnet.seeder.example.com` | Domain name the seeder is authoritative for |
-| `crawl_interval` | `ZEBRA_SEEDER__CRAWL_INTERVAL` | `600` (10 minutes) | Duration between network crawls (supports humantime format like "10m" or "1h") |
 | `network.network` | `ZEBRA_SEEDER__NETWORK__NETWORK` | `Mainnet` | Zcash network to connect to (`Mainnet` or `Testnet`) |
 | `metrics.endpoint_addr` | `ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR` | (disabled) | Prometheus metrics endpoint address. Omit to disable metrics. |
 | `rate_limit.queries_per_second` | `ZEBRA_SEEDER__RATE_LIMIT__QUERIES_PER_SECOND` | `10` | Maximum DNS queries per second per IP address. Prevents DNS amplification attacks. |
@@ -145,17 +144,4 @@ docker run -d -p 1053:1053/udp -p 1053:1053/tcp dnsseederNG
 **Configuration with Docker:**
 Pass environment variables to the container. See `docker-compose.yml` for examples.
 
-## Roadmap
-- [x] Initial Scaffolding (Project setup, basic dependencies)
-- [x] Configuration System (Env vars, TOML, Defaults, Dotenv)
-- [x] CLI Entry Point
-- [x] Implement DNS Request Handler (Connect `AddressBook` to DNS responses)
-- [x] Implement Crawler Logic (Active peer discovery loop & monitoring)
-- [x] Metrics & Observability (Basic Prometheus exporter and tracing)
-- [x] CI/CD (GitHub Actions)
-- [x] Deployment (Containerization)
-- [ ] Improve bootstrapping (Resilience against seed failures) 
-
-## Known Issues
-- [X] DNS server not accessible over udp/1053 when running in docker.  May be distroless related.  Issue was determined to be related to local workstation MacOS / Colima / Docker interaction and is not reproducible in a production container environment.
 

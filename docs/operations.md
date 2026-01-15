@@ -20,7 +20,6 @@ Prefix all variables with `ZEBRA_SEEDER__` and use double underscores for nestin
 ZEBRA_SEEDER__DNS_LISTEN_ADDR="0.0.0.0:53"
 ZEBRA_SEEDER__SEED_DOMAIN="mainnet.seeder.example.com"
 ZEBRA_SEEDER__DNS_TTL="600"
-ZEBRA_SEEDER__CRAWL_INTERVAL="10m"
 
 # Network
 ZEBRA_SEEDER__NETWORK__NETWORK="Mainnet"  # or "Testnet"
@@ -50,7 +49,6 @@ Example `config.toml`:
 dns_listen_addr = "0.0.0.0:53"
 seed_domain = "mainnet.seeder.example.com"
 dns_ttl = 600
-crawl_interval = "10m"
 
 [network]
 network = "Mainnet"
@@ -72,7 +70,6 @@ Use with: `zebra-seeder start --config config.toml`
 | `dns_listen_addr` | `ZEBRA_SEEDER__DNS_LISTEN_ADDR` | `0.0.0.0:53` | DNS server address and port |
 | `dns_ttl` | `ZEBRA_SEEDER__DNS_TTL` | `600` | DNS response TTL in seconds |
 | `seed_domain` | `ZEBRA_SEEDER__SEED_DOMAIN` | `mainnet.seeder.example.com` | Authoritative domain |
-| `crawl_interval` | `ZEBRA_SEEDER__CRAWL_INTERVAL` | `10m` | Network crawl frequency |
 | `network.network` | `ZEBRA_SEEDER__NETWORK__NETWORK` | `Mainnet` | Zcash network (`Mainnet` or `Testnet`) |
 | `rate_limit.queries_per_second` | `ZEBRA_SEEDER__RATE_LIMIT__QUERIES_PER_SECOND` | `10` | Max queries/sec per IP |
 | `rate_limit.burst_size` | `ZEBRA_SEEDER__RATE_LIMIT__BURST_SIZE` | `20` | Burst capacity |

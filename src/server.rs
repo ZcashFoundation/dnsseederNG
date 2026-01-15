@@ -98,31 +98,31 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     )
     .await;
 
-    // Spawn the Crawl Coordinator
-    let crawl_interval = config.crawl_interval;
+    // Metrics/status logging interval (zebra-network handles actual crawling internally)
+    const METRICS_LOG_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
+
+    // Spawn the metrics logger task
     let address_book_monitor = address_book.clone();
     let default_port = config.network.network.default_port();
 
-    let crawler_handle = tokio::spawn(async move {
-        // Keep peer_set alive in the crawler task to ensure the network stack keeps running
+    let metrics_handle = tokio::spawn(async move {
+        // Keep peer_set alive to ensure the network stack keeps running
         let _keep_alive = peer_set;
 
-        // Wait specifically for the first crawl to (hopefully) finish or at least start before logging
-        // But for now, standard interval tick is fine.
-        let mut interval = time::interval(crawl_interval);
+        let mut interval = time::interval(METRICS_LOG_INTERVAL);
 
         loop {
             interval.tick().await;
-            tracing::info!("Starting network crawl...");
 
             // Log Address Book stats
             let book = match address_book_monitor.lock() {
                 Ok(guard) => guard,
                 Err(poisoned) => {
                     tracing::error!(
-                        "Address book mutex poisoned during crawler monitoring, recovering"
+                        "Address book mutex poisoned during metrics logging, recovering"
                     );
-                    counter!("seeder.mutex_poisoning_total", "location" => "crawler").increment(1);
+                    counter!("seeder.mutex_poisoning_total", "location" => "metrics_logger")
+                        .increment(1);
                     poisoned.into_inner()
                 }
             };
@@ -179,8 +179,8 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
             result.wrap_err("DNS server crashed")?;
             tracing::info!("DNS server stopped, shutting down...");
 
-            // Clean up crawler task
-            crawler_handle.abort();
+            // Clean up metrics logger task
+            metrics_handle.abort();
 
             // Brief delay to allow cleanup
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -188,14 +188,14 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received shutdown signal, cleaning up...");
 
-            // Abort the crawler task
-            crawler_handle.abort();
+            // Abort the metrics logger task
+            metrics_handle.abort();
 
             // Note: ServerFuture doesn't have a graceful shutdown method,
             // so we rely on the Drop implementation to clean up sockets
 
             // Brief delay to allow:
-            // - Crawler task to finish aborting
+            // - Metrics logger task to finish aborting
             // - Any in-flight DNS responses to complete
             // - Metrics to flush (PrometheusBuilder handles this internally)
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;

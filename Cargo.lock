@@ -5337,7 +5337,6 @@ dependencies = [
  "hickory-proto",
  "hickory-resolver",
  "hickory-server",
- "humantime-serde",
  "metrics",
  "metrics-exporter-prometheus",
  "proptest",
