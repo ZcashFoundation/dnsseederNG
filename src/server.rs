@@ -63,12 +63,25 @@ impl RateLimiter {
         }
     }
 
+    /// This method checks if the provided [`IpAddr`] is within the configured rate limit.
+    ///
+    /// # Correctness
+    ///
+    /// This method uses [`DashMap`] for concurrent mutable access to the collection tracking rate limits by IP.
+    /// [`DashMap`] uses fine-grained locks such that there should be little to no contention except when locking the same key.
+    ///
+    /// In order to ensure that there can be no contention when this method is called frequently and concurrently with the same IP,
+    /// it checks for an existing entry or inserts a new one, then immediately clones and drops the reference.
     fn check(&self, ip: IpAddr) -> bool {
         let limiter = self
             .limiters
             .entry(ip)
             .or_insert_with(|| Arc::new(GovernorLimiter::direct(self.quota)))
             .clone();
+
+        // TODO:
+        // - Limit the number of IPs being tracked (too many possible ipv6 addresses, otherwise it would be maximum of ~3MB)
+        // - Stop tracking IPs one second after their last request (when the rate limiter reverts to its default state)
 
         limiter.check().is_ok()
     }
