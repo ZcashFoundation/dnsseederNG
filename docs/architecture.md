@@ -11,11 +11,12 @@ graph TD
     C -->|Check IP| D{Allow?}
     D -->|Yes| E[SeederAuthority]
     D -->|No| F[Drop Packet]
-    E --> G[Address Book]
-    G --> H[zebra-network]
-    H -->|Peer Discovery| I[Zcash Network]
-    E --> J[Filter & Shuffle]
-    J --> K[Return A/AAAA Records]
+    E --> G[Address Cache]
+    G -->|watch channel| H[Cache Updater]
+    H -->|5s interval| I[Address Book]
+    I --> J[zebra-network]
+    J -->|Peer Discovery| K[Zcash Network]
+    E --> L[Return A/AAAA Records]
 ```
 
 ### Core Components
@@ -23,7 +24,8 @@ graph TD
 - **zebra-network**: Handles Zcash P2P networking and peer discovery
 - **hickory-dns**: DNS server framework
 - **Rate Limiter**: Per-IP rate limiting using governor crate
-- **Address Book**: Thread-safe peer storage with mutex protection
+- **Address Cache**: Lock-free cache of eligible peers, updated every 5 seconds
+- **Address Book**: Thread-safe peer storage managed by zebra-network
 - **Metrics**: Prometheus metrics via metrics-exporter-prometheus
 
 ## Data Flow
@@ -34,8 +36,9 @@ graph TD
 2. Initialize metrics endpoint (if enabled)
 3. Initialize zebra-network with address book
 4. Create rate limiter (if enabled)
-5. Start DNS server on configured port
-6. Launch crawler task (monitors address book periodically)
+5. Spawn address cache updater (updates every 5 seconds)
+6. Start DNS server on configured port
+7. Spawn metrics logger task (logs status every 10 minutes)
 
 ### DNS Query Handling
 
@@ -47,12 +50,11 @@ sequenceDiagram
         Rate Limiter->>Authority: Process query
         Authority->>Authority: Validate domain
         alt Domain valid
-            Authority->>Address Book: Get peers
-            Address Book-->>Authority: Peer list
-            Authority->>Authority: Filter (IPv4, global, correct port)
-            Authority->>Authority: Shuffle & take 25
-            Authority-->>DNS Server: A records
-            DNS Server-->>Client: Response (25 IPs)
+            Authority->>Address Cache: Read cached peers
+            Note over Authority,Address Cache: Lock-free read via watch channel
+            Address Cache-->>Authority: IPv4 or IPv6 peer list
+            Authority-->>DNS Server: A/AAAA records
+            DNS Server-->>Client: Response (up to 25 IPs)
         else Domain invalid
             Authority-->>DNS Server: REFUSED
             DNS Server-->>Client: REFUSED
@@ -68,32 +70,54 @@ sequenceDiagram
 2. Rate limiter checks if IP is within limits
 3. If rate-limited: packet dropped silently (no amplification)
 4. If allowed: validate domain matches `seed_domain`
-5. Lock address book mutex (with poisoning recovery)
-6. Filter peers: IPv4/IPv6, global IPs, correct port
-7. Collect up to 50 eligible peers (early limiting optimization)
-8. Shuffle and take 25 peers
-9. Return DNS response
+5. Read from cached addresses (lock-free via watch channel)
+6. Return pre-filtered and shuffled peer list as DNS response
 
-### Network Crawling
+### Address Cache Updates
 
 ```mermaid
 sequenceDiagram
-    participant Crawler
+    participant CacheUpdater
     participant AddressBook
-    participant zebra-network
+    participant AddressCache
     participant Metrics
     
-    loop Every crawl_interval (default 10min)
-        Crawler->>AddressBook: Lock & read stats
-        AddressBook-->>Crawler: Peer counts
-        Crawler->>Metrics: Update gauges
-        Note over zebra-network,AddressBook: Continuous background updates
+    loop Every 5 seconds
+        CacheUpdater->>AddressBook: Lock & read peers
+        AddressBook-->>CacheUpdater: All peers
+        CacheUpdater->>CacheUpdater: Filter (global, correct port)
+        CacheUpdater->>CacheUpdater: Separate IPv4/IPv6
+        CacheUpdater->>CacheUpdater: Shuffle & take 25 each
+        CacheUpdater->>AddressCache: Update via watch channel
+        Note over AddressCache: DNS queries read from here
     end
 ```
 
 **How it works:**
-- zebra-network continuously discovers peers
-- Crawler task periodically logs Address Book stats
+- Background task updates cache every 5 seconds
+- Cache contains pre-filtered, pre-shuffled IPv4 and IPv6 lists
+- DNS queries read from cache without locking (via tokio `watch` channel)
+- Eliminates lock contention during high query load
+
+### Metrics Logging
+
+```mermaid
+sequenceDiagram
+    participant MetricsLogger
+    participant AddressBook
+    participant Metrics
+    
+    loop Every 10 minutes
+        MetricsLogger->>AddressBook: Lock & read stats
+        AddressBook-->>MetricsLogger: Peer counts
+        MetricsLogger->>Metrics: Update gauges
+        Note over MetricsLogger: zebra-network handles crawling internally
+    end
+```
+
+**How it works:**
+- zebra-network continuously discovers and manages peers
+- Metrics logger periodically logs Address Book stats
 - Metrics updated with peer counts (total, eligible IPv4/IPv6)
 
 ## Components Deep Dive
@@ -141,7 +165,7 @@ sequenceDiagram
 
 **Implementation:**
 - `governor` crate with token bucket algorithm
-- `DashMap` for lock-free concurrent IP tracking
+- `DashMap` for concurrent IP tracking
 - Each IP gets isolated rate limiter instance
 
 **Configuration:**
@@ -157,11 +181,55 @@ sequenceDiagram
 
 ---
 
+### Address Cache
+
+**What:** Lock-free cache providing pre-filtered peer addresses for DNS responses
+
+**Problem Solved:**
+- Original design locked the address book mutex on every DNS query
+- Under high query load, this caused lock contention
+- Queries backed up waiting for the mutex
+
+**Solution:**
+- Background task updates cache every 5 seconds
+- Uses `tokio::sync::watch` channel for lock-free reads
+- DNS queries read from cache without any locking
+
+**Implementation:**
+```rust
+struct AddressRecords {
+    ipv4: Vec<PeerSocketAddr>,  // Pre-filtered, shuffled
+    ipv6: Vec<PeerSocketAddr>,  // Pre-filtered, shuffled
+}
+
+// Cache updater runs every 5 seconds:
+// 1. Lock address book
+// 2. Filter peers (global IPs, correct port)
+// 3. Shuffle and take 25 each
+// 4. Send to watch channel
+
+// DNS handler reads without locking:
+let peers = match record_type {
+    A => cache.borrow().ipv4.clone(),
+    AAAA => cache.borrow().ipv6.clone(),
+};
+```
+
+**Trade-offs:**
+- ✅ Zero lock contention during DNS queries
+- ✅ Predictable low-latency responses
+- ⚠️ Peer list may be up to 5 seconds stale (acceptable for DNS seeding)
+
+**Files:** `src/server.rs` (`AddressRecords`, `spawn_addresses_cache_updater`)
+
+---
+
 ### Address Book & Mutex Handling
 
 **Mutex Strategy:**
 - Address Book protected by `std::sync::Mutex`
-- Shared via `Arc` between crawler and DNS handler
+- Only locked by cache updater (every 5 seconds) and metrics logger (every 10 minutes)
+- DNS queries never lock the mutex directly
 
 **Poisoning Recovery:**
 - If thread panics while holding lock, mutex becomes "poisoned"
@@ -169,10 +237,10 @@ sequenceDiagram
 - Log error + increment metric
 - Continue serving (availability over strict correctness)
 
-**Peer Filtering:**
+**Peer Filtering (done in cache updater):**
 - Global IPs only (no loopback, unspecified, multicast)
-- Match requested record type (A→IPv4, AAAA→IPv6)
 - Correct port (network default, usually 8233)
+- Separated by address family (IPv4/IPv6)
 
 ---
 
@@ -288,13 +356,13 @@ Implement per-IP rate limiting using `governor` crate:
 **Rationale:**
 - **Security**: Prevents amplification attacks
 - **Fairness**: No single IP can monopolize resources
-- **Performance**: <1ms overhead with lock-free DashMap
+- **Performance**: <1ms overhead with DashMap
 - **Configurability**: Operators can tune based on traffic
 - **Silent drops**: Avoid amplification (no error responses)
 
 **Implementation:**
 - `governor` crate for token bucket algorithm (GCRA)
-- `DashMap` for lock-free per-IP tracking
+- `DashMap` for per-IP tracking across threads in a single map
 - Each IP gets isolated rate limiter instance
 - Metrics track rate-limited requests
 
@@ -314,7 +382,7 @@ Implement per-IP rate limiting using `governor` crate:
 
 1. **Security First**: Rate limiting and domain validation prevent abuse
 2. **Availability**: Mutex poisoning recovery ensures continued operation
-3. **Performance**: Lock-free structures, early limiting, minimal allocations
+3. **Performance**: Concurrent data structures, early limiting, minimal allocations
 4. **Observability**: Comprehensive metrics for monitoring
 5. **Simplicity**: Leverage proven libraries (zebra-network, hickory-dns)
 6. **Configurability**: All key parameters are configurable

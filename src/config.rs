@@ -1,7 +1,7 @@
 use color_eyre::eyre::Result;
 use config::{Config, Environment, File};
 use serde::{Deserialize, Serialize};
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 /// Configuration for the Zebra Seeder.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -26,10 +26,6 @@ pub struct SeederConfig {
     ///
     /// Defaults to `600` (10 minutes).
     pub dns_ttl: u32,
-
-    /// Duration between refreshing the address book.
-    #[serde(with = "humantime_serde")]
-    pub crawl_interval: Duration,
 
     /// Prometheus metrics configuration.
     ///
@@ -92,8 +88,7 @@ impl Default for SeederConfig {
                 .parse()
                 .expect("hardcoded address must be valid"),
             seed_domain: "mainnet.seeder.example.com".to_string(),
-            dns_ttl: 600,                             // 10 minutes
-            crawl_interval: Duration::from_secs(600), // 10 minutes
+            dns_ttl: 600, // 10 minutes
             metrics: None,
             rate_limit: Some(RateLimitConfig::default()),
         }
