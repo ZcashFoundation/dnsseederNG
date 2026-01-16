@@ -10,6 +10,7 @@ use rand::seq::SliceRandom;
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::time;
 
@@ -18,6 +19,8 @@ use governor::state::InMemoryState;
 use governor::{Quota, RateLimiter as GovernorLimiter};
 use metrics::{counter, gauge, histogram};
 use tracing::{info_span, Instrument};
+
+use crossbeam_skiplist::SkipMap;
 
 /// Per-IP rate limiter for DNS queries
 struct RateLimiter {
@@ -32,8 +35,20 @@ struct RateLimiter {
             >,
         >,
     >,
+    by_last_response_time: SkipMap<Instant, IpAddr>,
     quota: Quota,
 }
+
+/// Entries are about 52-83B each in the `limiters` map (2-4B IpAddr, 16B Arc, 16B gcra,
+/// 8B start time, 8B state, and 2B or 31B clock type, more on modern AMD x86 CPUs), and
+/// about 12-14B each (12B Instant, 2-4B IpAddr, plus some overhead for the skiplist) in
+/// the `by_last_response_time` map.
+///
+/// A maximum of 10M entries would require <1GB to store, and most servers likely can't
+/// handle process that many requests in the 1s it takes for entries to be pruned so that
+/// the request handler won't regularly need to remove entries from the RateLimiter while
+/// processing requests.
+const MAX_RATE_LIMITER_ENTRIES: usize = 10_000_000;
 
 impl RateLimiter {
     fn new(queries_per_second: u32, burst_size: u32) -> Self {
@@ -42,18 +57,54 @@ impl RateLimiter {
 
         Self {
             limiters: DashMap::new(),
+            by_last_response_time: SkipMap::new(),
             quota,
         }
     }
 
+    /// This method checks if the provided [`IpAddr`] is within the configured rate limit.
+    ///
+    /// # Correctness
+    ///
+    /// This method uses [`DashMap`] for concurrent mutable access to the collection tracking rate limits by IP.
+    /// [`DashMap`] uses fine-grained locks such that there should be little to no contention except when locking the same key.
+    ///
+    /// In order to ensure that there can be no contention when this method is called frequently and concurrently with the same IP,
+    /// it checks for an existing entry or inserts a new one, then immediately clones and drops the reference.
     fn check(&self, ip: IpAddr) -> bool {
-        let limiter = self
+        // TODO:
+        // - `if limiter.check().is_ok()` Add an entry to a skiplist mapping [Instant] -> [IpAddr]
+        // - spawn a separate thread that takes all entries of before 1s ago and removes them if they are outdated in the dashmap
+        // - check the size of the dashmap before inserting, if it's too big, remove the oldest item in the skiplist from the dashmap and skiplist
+
+        // TODO:
+        // - Limit the number of IPs being tracked (too many possible ipv6 addresses, otherwise it would be maximum of ~3MB)
+        // - Stop tracking IPs one second after their last request (when the rate limiter reverts to its default state)
+
+        let should_allow = self
             .limiters
             .entry(ip)
             .or_insert_with(|| Arc::new(GovernorLimiter::direct(self.quota)))
-            .clone();
+            .clone()
+            .check()
+            .is_ok();
 
-        limiter.check().is_ok()
+        if should_allow {
+            self.by_last_response_time.insert(Instant::now(), ip);
+
+            // # Performance
+            //
+            // We check the length of the `by_last_response_time` map which is the maximum
+            // possible size of the `limiters` map as its `.len()` method simply loads an
+            // atomic integer where the DashMap would need to acquire a read lock for every
+            // bucket in the collection (the map is internally represented as `[RwLock<HashMap>]`).
+            if self.by_last_response_time.len() > MAX_RATE_LIMITER_ENTRIES {
+                let first_in = self.by_last_response_time.pop_front().unwrap();
+                self.limiters.remove(first_in.value());
+            }
+        }
+
+        should_allow
     }
 }
 
