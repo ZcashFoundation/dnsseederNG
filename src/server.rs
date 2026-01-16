@@ -1,110 +1,45 @@
-use crate::config::SeederConfig;
-use color_eyre::eyre::{Context, Result};
-use hickory_proto::op::{Header, ResponseCode};
-use hickory_proto::rr::{RData, Record, RecordType};
-use hickory_server::authority::MessageResponseBuilder;
-use hickory_server::server::{RequestHandler, ResponseHandler, ResponseInfo};
-use hickory_server::ServerFuture;
-use rand::rng;
-use rand::seq::SliceRandom;
-use std::net::IpAddr;
-use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::time::Instant;
-use tokio::net::{TcpListener, UdpSocket};
-use tokio::time;
+use std::{net::IpAddr, num::NonZeroU32, sync::Arc, time::Duration};
 
-use dashmap::DashMap;
-use governor::state::InMemoryState;
-use governor::{Quota, RateLimiter as GovernorLimiter};
+use color_eyre::eyre::{Context, Result};
+use governor::{clock, state::keyed::DashMapStateStore, Quota, RateLimiter as GovernorLimiter};
+use hickory_proto::{
+    op::{Header, ResponseCode},
+    rr::{RData, Record, RecordType},
+};
+use hickory_server::{
+    authority::MessageResponseBuilder,
+    server::{RequestHandler, ResponseHandler, ResponseInfo},
+    ServerFuture,
+};
 use metrics::{counter, gauge, histogram};
+use rand::{rng, seq::SliceRandom};
+use tokio::{
+    net::{TcpListener, UdpSocket},
+    time,
+};
 use tracing::{info_span, Instrument};
 
-use crossbeam_skiplist::SkipMap;
+use crate::config::SeederConfig;
 
-/// Per-IP rate limiter for DNS queries
-struct RateLimiter {
-    limiters: DashMap<
-        IpAddr,
-        Arc<
-            GovernorLimiter<
-                governor::state::direct::NotKeyed,
-                InMemoryState,
-                governor::clock::DefaultClock,
-                governor::middleware::NoOpMiddleware,
-            >,
-        >,
-    >,
-    by_last_response_time: SkipMap<Instant, IpAddr>,
-    quota: Quota,
+type RateLimiter = GovernorLimiter<IpAddr, DashMapStateStore<IpAddr>, clock::DefaultClock>;
+
+/// The interval at which to prune the map of rate limits by IP of entries with an effectively fresh state.
+const RATE_LIMIT_PRUNE_INTERVAL: Duration = Duration::from_secs(5);
+
+trait RateLimiterExt {
+    fn new_map(queries_per_second: u32, burst_size: u32) -> Arc<Self>;
+    fn check(&self, key: IpAddr) -> bool;
 }
 
-/// Entries are about 52-83B each in the `limiters` map (2-4B IpAddr, 16B Arc, 16B gcra,
-/// 8B start time, 8B state, and 2B or 31B clock type, more on modern AMD x86 CPUs), and
-/// about 12-14B each (12B Instant, 2-4B IpAddr, plus some overhead for the skiplist) in
-/// the `by_last_response_time` map.
-///
-/// A maximum of 10M entries would require <1GB to store, and most servers likely can't
-/// handle process that many requests in the 1s it takes for entries to be pruned so that
-/// the request handler won't regularly need to remove entries from the RateLimiter while
-/// processing requests.
-const MAX_RATE_LIMITER_ENTRIES: usize = 10_000_000;
-
-impl RateLimiter {
-    fn new(queries_per_second: u32, burst_size: u32) -> Self {
+impl RateLimiterExt for RateLimiter {
+    fn new_map(queries_per_second: u32, burst_size: u32) -> Arc<Self> {
         let quota = Quota::per_second(NonZeroU32::new(queries_per_second).unwrap())
             .allow_burst(NonZeroU32::new(burst_size).unwrap());
-
-        Self {
-            limiters: DashMap::new(),
-            by_last_response_time: SkipMap::new(),
-            quota,
-        }
+        Arc::new(Self::dashmap(quota))
     }
 
-    /// This method checks if the provided [`IpAddr`] is within the configured rate limit.
-    ///
-    /// # Correctness
-    ///
-    /// This method uses [`DashMap`] for concurrent mutable access to the collection tracking rate limits by IP.
-    /// [`DashMap`] uses fine-grained locks such that there should be little to no contention except when locking the same key.
-    ///
-    /// In order to ensure that there can be no contention when this method is called frequently and concurrently with the same IP,
-    /// it checks for an existing entry or inserts a new one, then immediately clones and drops the reference.
-    fn check(&self, ip: IpAddr) -> bool {
-        // TODO:
-        // - `if limiter.check().is_ok()` Add an entry to a skiplist mapping [Instant] -> [IpAddr]
-        // - spawn a separate thread that takes all entries of before 1s ago and removes them if they are outdated in the dashmap
-        // - check the size of the dashmap before inserting, if it's too big, remove the oldest item in the skiplist from the dashmap and skiplist
-
-        // TODO:
-        // - Limit the number of IPs being tracked (too many possible ipv6 addresses, otherwise it would be maximum of ~3MB)
-        // - Stop tracking IPs one second after their last request (when the rate limiter reverts to its default state)
-
-        let should_allow = self
-            .limiters
-            .entry(ip)
-            .or_insert_with(|| Arc::new(GovernorLimiter::direct(self.quota)))
-            .clone()
-            .check()
-            .is_ok();
-
-        if should_allow {
-            self.by_last_response_time.insert(Instant::now(), ip);
-
-            // # Performance
-            //
-            // We check the length of the `by_last_response_time` map which is the maximum
-            // possible size of the `limiters` map as its `.len()` method simply loads an
-            // atomic integer where the DashMap would need to acquire a read lock for every
-            // bucket in the collection (the map is internally represented as `[RwLock<HashMap>]`).
-            if self.by_last_response_time.len() > MAX_RATE_LIMITER_ENTRIES {
-                let first_in = self.by_last_response_time.pop_front().unwrap();
-                self.limiters.remove(first_in.value());
-            }
-        }
-
-        should_allow
+    fn check(&self, key: IpAddr) -> bool {
+        self.check_key(&key).is_ok()
     }
 }
 
@@ -170,17 +105,28 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
     });
 
     // Initialize rate limiter if configured
-    let rate_limiter = config.rate_limit.as_ref().map(|rl_config| {
+    let (rate_limiter, prune_task) = if let Some(cfg) = &config.rate_limit {
         tracing::info!(
             "Rate limiting enabled: {} queries/sec per IP, burst size: {}",
-            rl_config.queries_per_second,
-            rl_config.burst_size
+            cfg.queries_per_second,
+            cfg.burst_size
         );
-        Arc::new(RateLimiter::new(
-            rl_config.queries_per_second,
-            rl_config.burst_size,
-        ))
-    });
+
+        let limiter = RateLimiter::new_map(cfg.queries_per_second, cfg.burst_size);
+        let prune_task = {
+            let limiter = limiter.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(RATE_LIMIT_PRUNE_INTERVAL).await;
+                    limiter.retain_recent();
+                }
+            })
+        };
+
+        (Some(limiter), prune_task)
+    } else {
+        (None, tokio::spawn(std::future::pending()))
+    };
 
     tracing::info!("Initializing DNS server on {}", config.dns_listen_addr);
 
@@ -220,6 +166,9 @@ pub async fn spawn(config: SeederConfig) -> Result<()> {
 
             // Brief delay to allow cleanup
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        result = prune_task => {
+            tracing::error!(?result, "rate limiter prune task exited unexpectedly");
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received shutdown signal, cleaning up...");
@@ -492,7 +441,7 @@ mod tests {
     // Rate Limiter Tests
     #[test]
     fn test_rate_limiter_allows_normal_queries() {
-        let limiter = RateLimiter::new(10, 20);
+        let limiter = RateLimiter::new_map(10, 20);
         let test_ip: IpAddr = "192.168.1.1".parse().unwrap();
 
         // First query should be allowed
@@ -504,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_blocks_excessive_queries() {
-        let limiter = RateLimiter::new(1, 2); // Very low limits for testing
+        let limiter = RateLimiter::new_map(1, 2); // Very low limits for testing
         let test_ip: IpAddr = "192.168.1.2".parse().unwrap();
 
         // First two queries should pass (burst size = 2)
@@ -517,7 +466,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_per_ip_isolation() {
-        let limiter = RateLimiter::new(1, 1);
+        let limiter = RateLimiter::new_map(1, 1);
         let ip1: IpAddr = "192.168.1.1".parse().unwrap();
         let ip2: IpAddr = "192.168.1.2".parse().unwrap();
 
@@ -531,7 +480,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_ipv6_support() {
-        let limiter = RateLimiter::new(10, 20);
+        let limiter = RateLimiter::new_map(10, 20);
         let ipv6: IpAddr = "2001:db8::1".parse().unwrap();
 
         assert!(limiter.check(ipv6), "IPv6 addresses should be supported");
@@ -760,7 +709,7 @@ mod tests {
         let address_book = create_test_address_book(vec![]);
 
         // Very low rate limit for testing
-        let rate_limiter = Arc::new(RateLimiter::new(1, 2));
+        let rate_limiter = RateLimiter::new_map(1, 2);
 
         let authority = SeederAuthority::new(
             address_book,
