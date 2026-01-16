@@ -6,18 +6,18 @@
 A Rust-based DNS seeder for the Zcash network, mirroring patterns from the [Zebra](https://github.com/zcashfoundation/zebra) project.
 
 ## Status
-**Current State**: Testing, awaiting code review, not production ready
+**Current State**: Beta.  Ready for production testing.
 
-### Completed Features
-- **Project Structure**: Initialized with `tokio`, `zebra-network`, `zebra-chain`, and `hickory-dns`.
+### Features
+- **Project Structure**: Native rust seeder using `zebra-network` and `hickory-dns`.
 - **Configuration**: Layered configuration system (Env Vars > Config File > Defaults) mirroring `zebrad`.
 - **Dotenv Support**: Automatically loads configuration from a `.env` file if present.
 - **CLI**: `clap`-based command line interface with `start` command.
 - **Async Runtime**: Basic `tokio` orchestration with `tracing` for logging.
-- **Crawler**: Active network crawler with address book monitoring.
-- **DNS Server**: Authoritative DNS server serving A/AAAA records from filtered peers.
+- **Crawler**: Active network crawler using `zebra-network`.
+- **DNS Server**: Authoritative DNS server serving A/AAAA records from filtered peers using `hickory-dns`.
 - **Rate Limiting**: Per-IP rate limiting to prevent DNS amplification attacks.
-- **Testing**: Unit tests for configuration loading and CLI argument parsing.
+- **Testing**: Unit tests for configuration loading and CLI argument parsing. Integration tests for DNS server and crawler.
 
 ## Documentation
 
