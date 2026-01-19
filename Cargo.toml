@@ -2,6 +2,12 @@
 name = "zebra-seeder"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A Zcash DNS seeder based on the Zebra architecture."
+repository = "https://github.com/zcashfoundation/dnsseederNG"
+keywords = ["zcash", "zebra", "dns", "seeder", "blockchain"]
+categories = ["cryptography::cryptocurrencies", "network-programming"]
+
 
 [dependencies]
 tokio = { version = "1.49", features = ["full", "tracing"] }

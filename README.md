@@ -1,7 +1,7 @@
 # dnsseederNG
 
-[![Rust CI](https://github.com/alchemydc/dnsseederNG/actions/workflows/ci.yml/badge.svg)](https://github.com/alchemydc/dnsseederNG/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/alchemydc/dnsseederNG/branch/dev/graph/badge.svg)](https://codecov.io/gh/alchemydc/dnsseederNG)
+[![Rust CI](https://github.com/zcashfoundation/dnsseederNG/actions/workflows/ci.yml/badge.svg)](https://github.com/zcashfoundation/dnsseederNG/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/zcashfoundation/dnsseederNG/branch/dev/graph/badge.svg)](https://codecov.io/gh/zcashfoundation/dnsseederNG)
 
 A Rust-based DNS seeder for the Zcash network, mirroring patterns from the [Zebra](https://github.com/zcashfoundation/zebra) project.
 
@@ -143,5 +143,15 @@ docker run -d -p 1053:1053/udp -p 1053:1053/tcp dnsseederNG
 
 **Configuration with Docker:**
 Pass environment variables to the container. See `docker-compose.yml` for examples.
+
+## License
+
+This project is licensed under either of:
+
+ * Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
 
 

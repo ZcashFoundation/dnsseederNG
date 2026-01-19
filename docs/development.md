@@ -13,7 +13,7 @@ Guide for contributors and developers working on zebra-seeder.
 ### Clone and Build
 
 ```bash
-git clone https://github.com/alchemydc/dnsseederNG
+git clone https://github.com/zcashfoundation/dnsseederNG
 cd dnsseederNG
 cargo build
 ```

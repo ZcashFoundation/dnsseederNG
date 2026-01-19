@@ -9,6 +9,8 @@ updates:
     open-pull-requests-limit: 5
     reviewers:
       - "alchemydc"
+      - "arya2"
+      - "gustavovalverde"
     labels:
       - "dependencies"
       - "rust"
