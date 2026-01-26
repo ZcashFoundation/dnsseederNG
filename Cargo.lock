@@ -5271,6 +5271,65 @@ dependencies = [
  "static_assertions",
  "tempfile",
  "thiserror 2.0.17",
+ "tracing",
+ "uint 0.10.0",
+ "x25519-dalek",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_history",
+ "zcash_note_encryption",
+ "zcash_primitives",
+ "zcash_protocol",
+ "zcash_script",
+ "zcash_transparent",
+]
+
+[[package]]
+name = "zebra-chain"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b41d733382b3ecbf892f816ab9c1e448c9ae868d2bbb9f12a55b80c4e21fee2"
+dependencies = [
+ "bech32",
+ "bitflags",
+ "bitflags-serde-legacy",
+ "bitvec",
+ "blake2b_simd",
+ "blake2s_simd",
+ "bs58",
+ "byteorder",
+ "chrono",
+ "derive-getters",
+ "dirs",
+ "ed25519-zebra",
+ "equihash",
+ "futures",
+ "group",
+ "halo2_proofs",
+ "hex",
+ "humantime",
+ "incrementalmerkletree",
+ "itertools",
+ "jubjub",
+ "lazy_static",
+ "num-integer",
+ "orchard",
+ "primitive-types",
+ "rand_core 0.6.4",
+ "rayon",
+ "reddsa",
+ "redjubjub",
+ "ripemd 0.1.3",
+ "sapling-crypto",
+ "secp256k1",
+ "serde",
+ "serde-big-array",
+ "serde_with",
+ "sha2 0.10.9",
+ "sinsemilla",
+ "static_assertions",
+ "tempfile",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "uint 0.10.0",
@@ -5287,9 +5346,9 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "2.0.2"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3edeb353c33962fb5f9012745ddb44d33ee90acb8c9410669bf54d72488b8cf"
+checksum = "d3a34b04cb134997950b1ad0138aef9a6320f7aec16cab082419652ae3fcac8e"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -5319,7 +5378,7 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-futures",
- "zebra-chain",
+ "zebra-chain 4.0.0",
 ]
 
 [[package]]
@@ -5348,7 +5407,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "vergen-gitcl",
- "zebra-chain",
+ "zebra-chain 3.1.0",
  "zebra-network",
 ]
 
