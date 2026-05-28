@@ -79,7 +79,20 @@ ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR="0.0.0.0:9999"
 | `metrics.endpoint_addr` | `ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR` | (disabled) | Prometheus metrics endpoint address. Omit to disable metrics. |
 | `rate_limit.queries_per_second` | `ZEBRA_SEEDER__RATE_LIMIT__QUERIES_PER_SECOND` | `10` | Maximum DNS queries per second per IP address. Prevents DNS amplification attacks. |
 | `rate_limit.burst_size` | `ZEBRA_SEEDER__RATE_LIMIT__BURST_SIZE` | `20` | Burst capacity for short traffic spikes (typically 2x the rate limit). |
+| `tip_filter.probe_concurrency` | `ZEBRA_SEEDER__TIP_FILTER__PROBE_CONCURRENCY` | (disabled) | (experimental) Max in-flight peer probes. Setting any `tip_filter.*` field enables the chain-tip-aware peer filter. |
+| `tip_filter.tip_tolerance_blocks` | `ZEBRA_SEEDER__TIP_FILTER__TIP_TOLERANCE_BLOCKS` | `8` | (experimental) Max height delta from reference tip for a peer to count as "synced". |
+| `tip_filter.min_synced_peers` | `ZEBRA_SEEDER__TIP_FILTER__MIN_SYNCED_PEERS` | `16` | (experimental) Per-address-family count below which the filter falls back to the unfiltered set. |
+| `tip_filter.min_probe_sample` | `ZEBRA_SEEDER__TIP_FILTER__MIN_PROBE_SAMPLE` | `8` | (experimental) Minimum fresh probe samples required before a reference tip is computed. |
 
+### Chain-tip-aware peer filtering (experimental)
+
+An opt-in subsystem that probes peers for their reported chain height
+and restricts DNS responses to peers near the current tip — useful when
+the address book is dominated by stale or unsynced nodes. Disabled by
+default; setting any `ZEBRA_SEEDER__TIP_FILTER__*` env var (or any field
+under `[tip_filter]` in TOML) enables it. The full configuration
+reference, metrics, log format, debugging recipes, and known limitations
+are in **[docs/tip-filter.md](docs/tip-filter.md)**.
 
 ## Architecture
 - **Networking**: Uses `zebra-network` for peer discovery and management.

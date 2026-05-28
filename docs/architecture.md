@@ -260,6 +260,18 @@ let peers = match record_type {
 
 ---
 
+### Tip Filter (optional, experimental)
+
+Opt-in subsystem that probes peers for their reported chain height and
+restricts DNS responses to peers near the current tip, with a safe
+fallback to the unfiltered set when too few synced peers are known.
+Lives in `src/probe.rs`, `src/tip_filter.rs`, and `src/rpc_tip.rs`,
+with integration points in `src/server.rs`. Disabled by default. See
+[Tip Filter](tip-filter.md) for the full design, configuration, metrics,
+and limitations.
+
+---
+
 ### Metrics
 
 **Prometheus metrics exposed on configurable endpoint (default `:9999/metrics`)**

@@ -75,6 +75,16 @@ Use with: `zebra-seeder start --config config.toml`
 | `rate_limit.burst_size` | `ZEBRA_SEEDER__RATE_LIMIT__BURST_SIZE` | `20` | Burst capacity |
 | `metrics.endpoint_addr` | `ZEBRA_SEEDER__METRICS__ENDPOINT_ADDR` | (disabled) | Prometheus endpoint |
 
+### Tip Filter (Experimental)
+
+An opt-in chain-tip-aware peer filter is also available. When enabled,
+the seeder probes peers for their reported chain height and restricts
+DNS responses to peers near the current tip. It is **disabled by
+default** and lives behind the `tip_filter` config block. See
+[Tip Filter](tip-filter.md) for the env-var/TOML forms, the full
+configuration reference, the new `seeder.tip.*` / `seeder.probes.*`
+metrics, and known limitations.
+
 ## Deployment
 
 ### Prerequisites
@@ -223,6 +233,11 @@ ufw allow from 10.0.0.0/8 to any port 9999 proto tcp
 | `seeder.dns.queries_total` | Counter | `record_type=A\|AAAA` | Total queries | - |
 | `seeder.dns.response_peers` | Histogram | - | Peers per response | - |
 | `seeder.peers.total` | Gauge | - | Total peers in book | - |
+
+When the experimental [Tip Filter](tip-filter.md) is enabled, an
+additional set of `seeder.tip.*` and `seeder.probes.*` metrics appears
+(reference height, source, per-family synced peer counts, probe
+latency histograms, etc.). Those are documented in the Tip Filter page.
 
 ### Sample Prometheus Queries
 

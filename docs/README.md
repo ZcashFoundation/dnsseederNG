@@ -7,6 +7,7 @@ Documentation for the Zcash DNS seeder.
 - **[Architecture](architecture.md)** - System design, components, and key decisions (ADRs)
 - **[Operations](operations.md)** - Configuration, deployment, and monitoring
 - **[Development](development.md)** - Contributing and development guide
+- **[Tip Filter](tip-filter.md)** - Chain-tip-aware peer filtering (**experimental**, opt-in)
 
 ## Start Here
 

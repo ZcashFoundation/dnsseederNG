@@ -46,6 +46,9 @@ zebra-seeder/
 │   ├── config.rs         # Configuration structures
 │   ├── server.rs         # DNS server + crawler logic
 │   ├── metrics.rs        # Prometheus metrics setup
+│   ├── tip_filter.rs     # (experimental) Tip-filter pure logic + tests
+│   ├── probe.rs          # (experimental) Peer-height probe task
+│   ├── rpc_tip.rs        # (experimental) Optional trusted-RPC poller
 │   └── tests/            # Unit tests
 │       ├── mod.rs
 │       ├── cli_tests.rs
@@ -64,6 +67,7 @@ zebra-seeder/
 - **`config.rs`**: `SeederConfig` struct, configuration loading
 - **`server.rs`**: Core logic - DNS server, rate limiting, crawler
 - **`metrics.rs`**: Prometheus metrics initialization
+- **`tip_filter.rs` / `probe.rs` / `rpc_tip.rs`**: Experimental opt-in chain-tip-aware peer filter — see [Tip Filter](tip-filter.md).
 
 ## Code Overview
 
