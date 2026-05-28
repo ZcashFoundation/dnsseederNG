@@ -24,7 +24,7 @@ tower = { version = "0.5", features = ["util"] }
 zebra-network = "2.0.2"
 zebra-chain = "3.1.0"
 dotenvy = "0.15.7"
-rand = "0.9.2"
+rand = "0.10.1"
 async-trait = "0.1.89"
 hickory-server = "0.25.2"
 hickory-proto = "0.25.2"
