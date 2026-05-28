@@ -21,9 +21,17 @@ updates:
       zebra:
         patterns:
           - "zebra-*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
       hickory:
         patterns:
           - "hickory-*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
       minor-and-patch:
         update-types:
           - "minor"
